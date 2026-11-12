@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { useId } from 'react';
 import { Receipt } from '@/components/costs';
 import { ActionForm } from '@/components/form';
 import { Photo } from '@/components/room-card';
@@ -18,13 +19,14 @@ const funnel = ['onboarding_completed', 'discover_view', 'compatible_profile_ope
 const short = (id: string | null) => (id ? id.slice(0, 8) : '—');
 
 function Moderate({ kind, target, actions }: { kind: string; target: string; actions: [string, string, ('primary' | 'plain' | 'danger')?][] }) {
+  const id = useId();
   return (
     <div className="stack">
       {actions.map(([action, text, variant = 'plain']) => (
         <ActionForm key={action} op="moderate" submit={text} small variant={variant} className="row">
           <input type="hidden" name="kind" value={kind} /><input type="hidden" name="target" value={target} /><input type="hidden" name="action" value={action} />
-          <label className="sr" htmlFor={`${action}-${target}`}>Reason to {text.toLowerCase()}</label>
-          <input id={`${action}-${target}`} name="reason" type="text" required minLength={5} maxLength={500} placeholder={`Reason to ${text.toLowerCase()} (logged)`} style={{ flex: 1, minWidth: 180 }} />
+          <label className="sr" htmlFor={`${id}-${action}`}>Reason to {text.toLowerCase()}</label>
+          <input id={`${id}-${action}`} name="reason" type="text" required minLength={5} maxLength={500} placeholder={`Reason to ${text.toLowerCase()} (logged)`} style={{ flex: 1, minWidth: 180 }} />
         </ActionForm>
       ))}
     </div>
@@ -42,11 +44,11 @@ export default async function Admin() {
     db.rpc('moderation_profiles'),
     db.from('data_subject_requests').select('id,user_id,kind,details,created_at').eq('status', 'pending').order('created_at').limit(50),
     db.from('moderation_actions').select('*').order('created_at', { ascending: false }).limit(30),
-    db.from('product_events').select('event').gte('created_at', since).limit(5000),
+    Promise.all(funnel.map(e => db.from('product_events').select('id', { count: 'exact', head: true }).eq('event', e).gte('created_at', since).then(r => [e, r.count ?? 0] as const))),
     db.from('listings').select('id', { count: 'exact', head: true }).eq('status', 'active'),
   ]);
-  const counts = new Map<string, number>();
-  for (const e of (events.data ?? []) as { event: string }[]) counts.set(e.event, (counts.get(e.event) ?? 0) + 1);
+  const counts = new Map<string, number>(events);
+  const anyEvents = events.some(([, n]) => n > 0);
   const reportRows = (reports.data ?? []) as Report[];
   const memberRows = (members.data ?? []) as Member[];
   const next: Record<string, [string, string, ('primary' | 'plain' | 'danger')?][]> = {
@@ -69,7 +71,7 @@ export default async function Admin() {
           </div>
           <div className="table-scroll prose card" style={{ marginTop: 12 }}>
             <table>
-              <caption className="small muted" style={{ textAlign: 'left' }}>Funnel events from members who opted in to analytics. {events.data?.length ? '' : 'Not enough data yet.'}</caption>
+              <caption className="small muted" style={{ textAlign: 'left' }}>Funnel events from members who opted in to analytics. {anyEvents ? '' : 'Not enough data yet.'}</caption>
               <thead><tr><th scope="col">Event</th><th scope="col">Count</th></tr></thead>
               <tbody>{funnel.map(e => <tr key={e}><td>{e.replaceAll('_', ' ')}</td><td>{counts.get(e) ?? 0}</td></tr>)}</tbody>
             </table>
@@ -132,7 +134,7 @@ export default async function Admin() {
                 <h3>{r.kind === 'delete' ? 'Account deletion' : r.kind === 'export' ? 'Data export' : 'Support or appeal'}</h3>
                 {r.details ? <p style={{ whiteSpace: 'pre-wrap' }}>{r.details}</p> : null}
                 <p className="small muted">Member {short(r.user_id)} · {timeText(r.created_at)}</p>
-                {r.kind === 'delete' ? <p className="small muted">Deletion is completed in the Supabase dashboard by an operator, following docs/PRIVACY-AND-SAFETY.md. It can’t be marked done from here.</p> : <Moderate kind="request" target={r.id} actions={[['fulfill', 'Mark as handled', 'primary']]} />}
+                {r.kind === 'delete' ? <p className="small muted">Deletion is completed by an operator in the Supabase dashboard (see “Completing an account deletion request” in docs/DEPLOYMENT.md). It can’t be marked done from here.</p> : <Moderate kind="request" target={r.id} actions={[['fulfill', 'Mark as handled', 'primary']]} />}
               </article>
             )) : <p className="muted">No pending requests.</p>}
           </div>

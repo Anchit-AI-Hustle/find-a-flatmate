@@ -38,9 +38,9 @@ export function ActionForm({ op, submit, children, className, variant = 'primary
     >
       {children}
       <button className={cls} disabled={pending} aria-disabled={pending}>{pending ? pendingLabel : submit}</button>
-      <div className="form-msg" aria-live="polite">
+      <div className="form-msg" role="status">
         {state.error ? <p className="note error" role="alert">{state.error}</p> : null}
-        {state.success && !quiet ? <p className="note">{state.success}</p> : null}
+        {state.success ? <p className={quiet ? 'sr' : 'note'}>{quiet ? 'Done.' : state.success}</p> : null}
         {state.evidence ? <blockquote className="note warn">{state.evidence}</blockquote> : null}
       </div>
     </form>

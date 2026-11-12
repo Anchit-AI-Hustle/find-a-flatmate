@@ -20,6 +20,7 @@ The P0 product is built and passes its tests against a real local Supabase stack
 | Saved items, matches list, visits (request, confirm, decline, reschedule, cancel, complete, no-show), address sharing | Built; verified locally | journeys spec; workflows tests |
 | Moderation dashboard with audit log and logged message evidence | Built; verified locally | journeys spec; `tests/integration/access.test.ts` |
 | Row-level security, server validation, rate limits | Built; verified locally | 39 integration tests |
+| Fixes from the independent code review (declined requests clear, any message reportable, visit address window, paused-owner listings, passed rooms, honest analytics and waitlist wording) | Built; verified locally | `tests/e2e/regressions.spec.ts` |
 | Privacy settings, data export download, support and appeal, account closure | Built; verified locally | journeys spec |
 | First-party, opt-in product events and moderator funnel counts | Built | workflows tests |
 | Installable PWA: manifest, icons, offline page, service worker | Built, live | public spec |
@@ -49,6 +50,7 @@ See `docs/THREAT-MODEL.md` for the full list. The ones that matter most before a
 4. No CAPTCHA on sign-in and no script-restricting Content-Security-Policy.
 5. Legal pages are drafts; no legal or DPDP review has taken place.
 6. Rate limits count successful calls only.
+7. After a quiet one-tap action (confirm a visit, pause a listing) keyboard focus is not moved to the updated content; the result is announced to screen readers but this has not been tested with assistive technology.
 
 ## Release gate
 

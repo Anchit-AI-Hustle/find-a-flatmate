@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { BadgeCheck } from 'lucide-react';
-import { areaName, cities, dimensions, intents, rupees, titles, type City } from '@/lib/catalog';
+import { areaName, cities, dimensions, intents, rupees, titles, today, type City } from '@/lib/catalog';
 import { me } from '@/lib/db';
 import { logout } from '@/lib/actions';
 import { dateText } from '@/lib/validate';
@@ -9,10 +9,11 @@ export const metadata = { title: 'Your profile' };
 export default async function ProfilePage() {
   const { profile: p, answers, user } = await me();
   const keys = Object.keys(dimensions) as (keyof typeof dimensions)[];
+  const stale = p.move_until < today();
   const answered = keys.filter(k => answers[k]?.habit || answers[k]?.want).length;
   return (
     <div className="stack">
-      <div className="page-title"><h1>{p.display_name}</h1><span className={`chip ${p.status === 'active' ? '' : 'amber'}`}>{p.status === 'active' ? (p.discoverable ? 'Active and discoverable' : 'Active, hidden from Discover') : 'Paused'}</span></div>
+      <div className="page-title"><h1>{p.display_name}</h1><span className={`chip ${p.status === 'active' && !stale ? '' : 'amber'}`}>{p.status !== 'active' ? 'Paused' : stale ? 'Not shown in Discover: update your dates' : p.discoverable ? 'Active and discoverable' : 'Active, hidden from Discover'}</span></div>
       <section className="card stack" aria-labelledby="basics">
         <div className="row between"><h2 id="basics">Basics</h2><Link className="btn small" href="/onboarding/basics">Edit basics</Link></div>
         <dl className="receipt" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 16px' }}>

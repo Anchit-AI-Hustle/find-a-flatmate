@@ -1,14 +1,16 @@
 import Link from 'next/link';
 import { ActionForm } from '@/components/form';
 import { cities, intents, type City } from '@/lib/catalog';
-import { me, type Thread } from '@/lib/db';
+import { me, pendingRequests, type Thread } from '@/lib/db';
+import { today } from '@/lib/catalog';
 
 export const metadata = { title: 'Overview' };
 export default async function Overview() {
-  const { db, user, profile } = await me();
+  const s = await me();
+  const { db, user, profile } = s;
   const [inbox, incoming, visits, mine, people, rooms, waiting] = await Promise.all([
     db.rpc('inbox'),
-    db.from('interests').select('actor_id', { count: 'exact', head: true }).eq('target_id', user.id).eq('status', 'sent'),
+    pendingRequests(s),
     db.from('visit_requests').select('id', { count: 'exact', head: true }).in('status', ['requested', 'confirmed', 'rescheduled']),
     db.from('listings').select('id,status').eq('owner_id', user.id).not('status', 'in', '(filled,removed)'),
     db.rpc('discover_people', { city: profile.city_id }),
@@ -24,7 +26,8 @@ export default async function Overview() {
   const draft = listings.find(l => l.status === 'draft');
   const next: { href: string; label: string; why: string }[] = [];
   if (profile.status === 'paused') next.push({ href: '/app/settings/privacy', label: 'Resume your profile', why: 'You’re paused, so nobody can find or match with you.' });
-  if (incoming.count) next.push({ href: '/app/matches', label: `Review ${incoming.count} interest request${incoming.count === 1 ? '' : 's'}`, why: 'Someone would like to chat. Accept to open a conversation.' });
+  if (profile.status === 'active' && profile.move_until < today()) next.push({ href: '/onboarding/basics', label: 'Update your move-in dates', why: 'Your move-in window has passed, so you’re no longer shown in Discover.' });
+  if (incoming.length) next.push({ href: '/app/matches', label: `Review ${incoming.length} interest request${incoming.length === 1 ? '' : 's'}`, why: 'Someone would like to chat. Accept to open a conversation.' });
   if (unread) next.push({ href: '/app/messages', label: `Read ${unread} new message${unread === 1 ? '' : 's'}`, why: 'Replies keep a conversation alive.' });
   if (visits.count) next.push({ href: '/app/visits', label: 'Check your visits', why: 'A visit is waiting for a reply or coming up.' });
   if (draft) next.push({ href: `/app/listings/${draft.id}/edit`, label: 'Finish your draft listing', why: 'Add a photo and submit it for review to go live.' });
@@ -48,7 +51,7 @@ export default async function Overview() {
         ) : (
           <div className="card stack">
             <h3>It’s quiet in {city} right now</h3>
-            <p className="muted">We’re new and only show real people and real rooms, so there’s nothing to pretend with. You can widen your localities, budget or dates, or ask us to tell you when more is available.</p>
+            <p className="muted">We’re new and only show real people and real rooms, so there’s nothing to pretend with. You can widen your localities, budget or dates, or join the waitlist so we know where to grow next (we don’t send alerts yet).</p>
             <div className="row">
               <Link className="btn" href="/onboarding/basics">Widen my search</Link>
               {waiting.data?.length ? <span className="chip">You’re on the {city} waitlist</span> : <ActionForm op="waitlist" submit={`Join the ${city} waitlist`} small className="inline-form" />}

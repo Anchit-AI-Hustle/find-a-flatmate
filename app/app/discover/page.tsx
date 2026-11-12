@@ -39,7 +39,8 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     if (max !== null) query = query.lte('monthly', max);
     query = q.sort === 'new' ? query.order('created_at', { ascending: false }) : query.order('available_from');
     const { data } = await query.limit(60).overrideTypes<Listing[], { merge: false }>();
-    let list = (data ?? []).map(l => ({ l, result: matchRoom(self, room(l)) }));
+    const passed = new Set(interests.filter(i => i.actor_id === user.id && i.status === 'passed').map(i => i.target_id));
+    let list = (data ?? []).filter(l => !passed.has(l.owner_id)).map(l => ({ l, result: matchRoom(self, room(l)) }));
     if (q.amenity && (amenities as readonly string[]).includes(q.amenity)) list = list.filter(x => x.l.listing_amenities?.some(a => a.amenity === q.amenity));
     total = list.length;
     if (!q.sort || q.sort === 'fit') list.sort(rank);
@@ -77,6 +78,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
   return (
     <>
       <div className="page-title"><h1>Discover</h1><span className="chip plain">{cities[city]?.name}</span></div>
+      {profile.status === 'paused' ? <p className="note warn">Your profile is paused, so Discover is empty and nobody can find you. <Link href="/app/settings/privacy">Resume your profile</Link></p> : null}
       <nav className="segmented" aria-label="What to show">
         <Link href="/app/discover" aria-current={rooms ? undefined : 'true'}>Find a person</Link>
         <Link href="/app/discover?mode=rooms" aria-current={rooms ? 'true' : undefined}>Find a room</Link>
@@ -114,7 +116,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
           <div className="row" style={{ justifyContent: 'center' }}>
             {filtered ? <Link className="btn" href={rooms ? '/app/discover?mode=rooms' : '/app/discover'}>Clear filters</Link> : null}
             <Link className="btn" href="/onboarding/basics">Change my localities, budget or dates</Link>
-            <ActionForm op="waitlist" submit="Tell me when there’s more" small className="inline-form" />
+            <ActionForm op="waitlist" submit="Join the waitlist (no alerts yet)" small className="inline-form" />
           </div>
         </div>
       )}

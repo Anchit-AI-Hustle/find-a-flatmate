@@ -50,18 +50,18 @@ export function VisitPanel({ conversation, visit, me, other, location }: { conve
         <summary className="small">Propose a different time</summary>
         <ActionForm op="visit" submit="Propose new time" small>{ids}<input type="hidden" name="action" value="reschedule" /><When id="visit-move" /></ActionForm>
       </details>
-      {visit.status === 'confirmed' && !past ? (
+      {visit.status === 'confirmed' ? (
         <div className="stack">
           <h3>Exact address</h3>
           {location ? <p className="note">{location}</p> : <p className="small muted">Not shared, or not visible yet. A shared address shows only to the two of you, from 24 hours before the visit until 2 hours after.</p>}
-          <details>
+          {past ? null : <details>
             <summary className="small">Share or remove the address for this visit</summary>
             <ActionForm op="location" submit="Share for this visit" small>
               {ids}
               <div className="field"><label htmlFor="loc">Flat, building and landmark</label><input id="loc" name="location" type="text" minLength={4} maxLength={300} required /></div>
             </ActionForm>
             <ActionForm op="location" submit="Remove what I shared" small variant="danger" quiet>{ids}</ActionForm>
-          </details>
+          </details>}
         </div>
       ) : null}
     </section>

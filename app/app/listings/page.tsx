@@ -4,6 +4,7 @@ import { ActionForm } from '@/components/form';
 import { RoomFacts } from '@/components/rooms';
 import { Art } from '@/components/site';
 import { expandedListing, me, type Listing } from '@/lib/db';
+import { nowMs, today } from '@/lib/catalog';
 import { dateText } from '@/lib/validate';
 
 export const metadata = { title: 'My listings' };
@@ -17,7 +18,10 @@ const status: Record<string, [string, string, string]> = {
   removed: ['Removed', 'coral', 'Removed by a moderator or with your account.'],
 };
 export default async function Listings() {
-  const { db, user } = await me();
+  const { db, user, profile } = await me();
+  const paused = profile.status === 'paused';
+  const day = today();
+  const now = nowMs();
   const { data } = await db.from('listings').select(expandedListing).eq('owner_id', user.id).order('created_at', { ascending: false }).overrideTypes<Listing[], { merge: false }>();
   const listings = data ?? [];
   const act = (id: string, action: string, text: string, variant: 'primary' | 'plain' | 'danger' = 'plain', confirm?: string) => (
@@ -26,21 +30,31 @@ export default async function Listings() {
   return (
     <>
       <div className="page-title"><h1>My listings</h1><Link className="btn primary small" href="/app/listings/new">List a room</Link></div>
+      {paused ? <p className="note warn">Your profile is paused, so your listings are hidden and can’t be changed. <Link href="/app/settings/privacy">Resume your profile</Link> to manage them.</p> : null}
       {listings.length ? (
         <div className="stack">
           {listings.map(l => {
-            const [name, tone, help] = status[l.status] ?? [l.status, 'plain', ''];
+            const lapsed = l.status === 'active' && l.expires_at !== null && Date.parse(l.expires_at) <= now;
+            const key = lapsed ? 'expired' : l.status;
+            const datesPassed = l.available_until < day;
+            const canRenew = ['active', 'paused', 'expired'].includes(l.status) && Boolean(l.reviewed_at) && !datesPassed;
+            let [name, tone, help] = status[key] ?? [key, 'plain', ''];
+            if (key === 'expired' || key === 'paused') {
+              if (datesPassed) help = 'Hidden because the move-in dates have passed. Edit the dates and submit it for review again.';
+              else if (!l.reviewed_at) help = 'Hidden after a moderator review. Edit it and submit it for review again to relist.';
+            }
+            if (paused && key === 'active') [name, tone, help] = ['Hidden while paused', 'amber', 'Your profile is paused, so nobody can see this listing.'];
             const closed = l.status === 'filled' || l.status === 'removed';
             return (
               <article key={l.id} className="card result">
                 <div className="head"><div style={{ minWidth: 0 }}><h2 style={{ fontSize: '1.2rem', margin: 0 }}>{l.title}</h2><Price costs={l} /></div><span className={`chip ${tone}`} style={{ marginLeft: 'auto' }}>{name}</span></div>
                 <RoomFacts room={l} />
-                <p className="small muted" style={{ margin: 0 }}>{help}{l.status === 'active' && l.expires_at ? ` Reconfirm by ${dateText(l.expires_at)} or it expires.` : ''} {l.listing_images?.length ?? 0} photo{l.listing_images?.length === 1 ? '' : 's'}.</p>
-                {closed ? null : (
+                <p className="small muted" style={{ margin: 0 }}>{help}{key === 'active' && !paused && l.expires_at ? ` Reconfirm by ${dateText(l.expires_at)} or it expires.` : ''} {l.listing_images?.length ?? 0} photo{l.listing_images?.length === 1 ? '' : 's'}.</p>
+                {closed || paused ? null : (
                   <div className="row">
                     <Link className="btn small" href={`/app/listings/${l.id}/edit`}>{l.status === 'draft' ? 'Edit, add photos and submit' : 'Edit'}</Link>
                     {l.status === 'active' ? act(l.id, 'pause', 'Pause') : null}
-                    {['active', 'paused', 'expired'].includes(l.status) && l.reviewed_at ? act(l.id, 'renew', l.status === 'active' ? 'Still available — reconfirm' : 'Reconfirm and relist', 'primary') : null}
+                    {canRenew ? act(l.id, 'renew', l.status === 'active' ? 'Still available — reconfirm' : 'Reconfirm and relist', 'primary') : null}
                     {act(l.id, 'fill', 'Mark as filled', 'danger', 'Close this listing as filled? This can’t be undone.')}
                   </div>
                 )}

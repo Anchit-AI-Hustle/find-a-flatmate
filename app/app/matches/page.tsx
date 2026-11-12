@@ -2,18 +2,22 @@ import Link from 'next/link';
 import { ActionForm } from '@/components/form';
 import { Avatar, InterestActions, PersonFacts } from '@/components/people';
 import { Art } from '@/components/site';
-import { me, type Candidate, type Interest, type Thread } from '@/lib/db';
+import { Fit } from '@/components/fit';
+import { me, pendingRequests, person, type Candidate, type Interest, type Thread } from '@/lib/db';
+import { matchPeople } from '@/lib/matching';
 
 export const metadata = { title: 'Matches' };
 export default async function Matches() {
-  const { db, user } = await me();
-  const [rows, inbox] = await Promise.all([
+  const s = await me();
+  const { db, user, person: self } = s;
+  const [rows, inbox, pending] = await Promise.all([
     db.from('interests').select('actor_id,target_id,status').order('updated_at', { ascending: false }).limit(120),
     db.rpc('inbox'),
+    pendingRequests(s),
   ]);
   const interests = (rows.data ?? []) as Interest[];
   const threads = (inbox.data ?? []) as Thread[];
-  const incoming = interests.filter(i => i.target_id === user.id && i.status === 'sent').slice(0, 20);
+  const incoming = pending.slice(0, 20);
   const sent = interests.filter(i => i.actor_id === user.id && i.status === 'sent').slice(0, 20);
   const set = interests.filter(i => i.actor_id === user.id && (i.status === 'passed' || i.status === 'withdrawn')).slice(0, 20);
   // Profiles are readable only through the vetted RPC, one candidate at a time.
@@ -21,6 +25,7 @@ export default async function Matches() {
   const [incomingPeople, sentPeople, setPeople] = await Promise.all([
     Promise.all(incoming.map(i => lookup(i.actor_id))), Promise.all(sent.map(i => lookup(i.target_id))), Promise.all(set.map(i => lookup(i.target_id))),
   ]);
+  const unavailable = incomingPeople.filter(c => !c).length;
   const empty = !threads.length && !incoming.length && !sent.length && !set.length;
   return (
     <>
@@ -36,13 +41,25 @@ export default async function Matches() {
       {incoming.length ? (
         <section className="stack" aria-labelledby="incoming">
           <h2 id="incoming">Interested in you</h2>
-          {incomingPeople.map(c => c ? (
-            <article key={c.id} className="card result">
-              <div className="head"><Avatar name={c.display_name} id={c.id} /><h3><Link href={`/app/people/${c.id}`}>{c.display_name}</Link></h3></div>
-              <PersonFacts c={c} />
-              <InterestActions target={c.id} relation={{ theirs: 'sent' }} />
-            </article>
-          ) : null)}
+          {incomingPeople.map(c => {
+            if (!c) return null;
+            const result = matchPeople(self, person(c, c.answers));
+            const blocked = result.hard_fail_reasons.some(r => r.startsWith('Dealbreaker'));
+            return (
+              <article key={c.id} className="card result">
+                <div className="head"><Avatar name={c.display_name} id={c.id} /><h3><Link href={`/app/people/${c.id}`}>{c.display_name}</Link></h3></div>
+                <PersonFacts c={c} />
+                <Fit result={result} limit={2} />
+                {blocked ? (
+                  <div className="stack">
+                    <p className="note warn">One of you has marked this difference as a dealbreaker, so a chat can’t be opened. You can change your own answers in your profile.</p>
+                    <ActionForm op="interest" submit="Not for me" small variant="plain" quiet className="inline-form"><input type="hidden" name="target" value={c.id} /><input type="hidden" name="action" value="pass" /></ActionForm>
+                  </div>
+                ) : <InterestActions target={c.id} relation={{ theirs: 'sent' }} />}
+              </article>
+            );
+          })}
+          {unavailable ? <p className="small muted">{unavailable} more request{unavailable === 1 ? ' is' : 's are'} from {unavailable === 1 ? 'a member who has' : 'members who have'} paused or left. {unavailable === 1 ? 'It' : 'They'} will reappear if they come back.</p> : null}
         </section>
       ) : null}
       {threads.length ? (

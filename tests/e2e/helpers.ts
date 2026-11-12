@@ -31,7 +31,7 @@ type Basics = { name: string; intent: 'I’m looking for a room' | 'I have a roo
 export async function onboard(page: Page, { name, intent, min = '12000', max = '25000' }: Basics) {
   await page.goto('/onboarding/intent');
   await page.getByRole('button', { name: new RegExp(intent) }).click();
-  await expect(page).toHaveURL(/\/onboarding\/basics/);
+  await expect(page).toHaveURL(/\/onboarding\/basics\?intent=/);
   await page.getByLabel('Display name').fill(name);
   await expect(page.getByRole('radio', { name: intent })).toBeChecked();
   await page.getByRole('checkbox', { name: 'Sector 56' }).check();

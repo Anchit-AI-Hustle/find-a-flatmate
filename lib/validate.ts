@@ -20,7 +20,7 @@ const listing=z.object({
  id:uuid.nullable(),title:plain(8,90),description:plain(10,1200),city_id:city,locality_id:z.string(),room_type:roomType,
  building:z.enum(['Society apartment','Independent floor','Standalone building','Other']),furnishing:z.enum(['Unfurnished','Semi-furnished','Furnished']),
  bath_sharing:z.enum(['Private','Shared']),rooms:num(1,20),bathrooms:num(1,20),occupants:num(0,20),capacity:num(1,20),poster_type:z.enum(['Occupant','Owner']),attested:checked,
- transport:plain(0,300),restrictions:plain(0,300),rent:paise.refine(p=>p>=100),maintenance:paise,utilities:z.union([z.literal('').transform(()=>null),paise]),
+ transport:plain(0,300),restrictions:plain(0,300),rent:paise.refine(p=>p>=100,{message:'Enter the monthly rent (at least ₹1)'}),maintenance:paise,utilities:z.union([z.literal('').transform(()=>null),paise]),
  recurring:paise,deposit:paise,brokerage:paise,fees:paise,available_from:day,available_until:day,min_months:num(1,36),amenities:z.array(z.enum(amenities)).max(7),
 }).refine(v=>v.capacity>v.occupants&&v.available_until>=v.available_from&&Object.hasOwn(cities[v.city_id].areas,v.locality_id),{message:'Check occupancy, locality and availability dates'})
  .refine(v=>within180(v.available_from,v.available_until),{message:'Keep the availability window within 180 days'});

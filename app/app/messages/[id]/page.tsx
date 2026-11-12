@@ -40,7 +40,7 @@ export default async function Conversation({ params }: { params: Promise<{ id: s
               <div key={m.id} className={`bubble${mine ? ' mine' : ''}${m.suspicious ? ' flag' : ''}`}>
                 <span className="sr">{mine ? 'You' : thread.display_name}: </span>{m.body}
                 <time dateTime={m.created_at}>{timeText(m.created_at)}</time>
-                {!mine && m.suspicious ? <ReportForm message={m.id} label="Report this message" /> : null}
+                {mine ? null : <ReportForm message={m.id} label="Report this message" />}
               </div>
             );
           }) : <p className="muted">You’ve matched. Say hello — a good first message mentions your move-in date and one thing from their profile.</p>}

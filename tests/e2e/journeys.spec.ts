@@ -212,7 +212,7 @@ test('a payment request is flagged; the seeker reports the message and blocks, w
   await expect(p.locator('.bubble.mine').last()).toContainText('token amount');
   await s.goto(chatUrl);
   await expect(s.getByRole('alert').filter({ hasText: 'Be careful.' })).toBeVisible();
-  await s.getByText('Report this message').click();
+  await s.locator('.bubble.flag').getByText('Report this message').click();
   const form = s.locator('.bubble.flag form');
   await form.getByLabel('What’s wrong?').selectOption('scam');
   await form.getByLabel('What happened?').fill(reportText);

@@ -62,7 +62,7 @@ export async function requireSession() {
 export async function requireProfile() {
   const s=await requireSession();
   const p=await profile();
-  if(!p) redirect('/onboarding/intent');
+  if(!p) redirect(/^(looking_for_room|have_room|find_together)$/.test((await cookies()).get('ff_intent')?.value??'')?'/onboarding/basics':'/onboarding/intent');
   if(p.status==='draft') {
     // Resume onboarding where the member left off.
     const {data}=await s.db.from('onboarding_progress').select('step').eq('user_id',s.user.id).maybeSingle<{step:string}>();
@@ -116,4 +116,12 @@ export async function me() {
 export function room(l:Listing):Room {
   return {ownerId:l.owner_id,city:l.city_id,areas:[l.locality_id],from:l.available_from,until:l.available_until,months:l.min_months,
     costs:{rent:l.rent,maintenance:l.maintenance,utilities:l.utilities,recurring:l.recurring,deposit:l.deposit,brokerage:l.brokerage,fees:l.fees},rules:answerMap(l.household_preferences??[])};
+}
+
+/** Interest requests waiting for this member's answer; ones they already passed on do not count. */
+export async function pendingRequests(s:NonNullable<Awaited<ReturnType<typeof session>>>):Promise<Interest[]> {
+  const {data}=await s.db.from('interests').select('actor_id,target_id,status').order('updated_at',{ascending:false}).limit(200);
+  const rows=(data??[]) as Interest[];
+  const declined=new Set(rows.filter(r=>r.actor_id===s.user.id&&r.status==='passed').map(r=>r.target_id));
+  return rows.filter(r=>r.target_id===s.user.id&&r.status==='sent'&&!declined.has(r.actor_id));
 }

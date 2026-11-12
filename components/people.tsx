@@ -39,6 +39,14 @@ export function InterestActions({ target, relation, listing, conversation }: { t
       </div>
     );
   }
+  if (relation.mine === 'passed' || relation.mine === 'withdrawn') {
+    return (
+      <div className="row">
+        <span className="chip plain">{relation.mine === 'passed' ? 'You passed' : 'Interest withdrawn'}</span>
+        <ActionForm op="interest" submit="Undo" small variant="plain" quiet className="inline-form">{hidden}<input type="hidden" name="action" value="reset" /></ActionForm>
+      </div>
+    );
+  }
   return (
     <div className="row">
       <ActionForm op="interest" submit={relation.theirs === 'sent' ? 'Accept and open chat' : listing ? 'I’m interested in this room' : 'I’m interested'} small className="inline-form" pendingLabel="Sending…">{hidden}<input type="hidden" name="action" value="like" /></ActionForm>

@@ -10,11 +10,14 @@ export const metadata = { title: 'Your basics', robots: { index: false } };
 const plus = (iso: string, days: number) => new Date(Date.parse(iso) + days * 864e5).toISOString().slice(0, 10);
 const rupee = (paise: number) => String(paise / 100);
 
-export default async function Basics() {
+export default async function Basics({ searchParams }: { searchParams: Promise<{ intent?: string }> }) {
   await requireSession();
   const p = await profile();
   if (p && (p.status === 'suspended' || p.status === 'closed')) redirect('/app/settings/data');
-  const chosen = (await cookies()).get('ff_intent')?.value;
+  // An explicit choice in the URL wins; the cookie only carries a choice made before signing in.
+  const picked = (await searchParams).intent;
+  const carried = !p || p.status === 'draft' ? (await cookies()).get('ff_intent')?.value : undefined;
+  const chosen = picked && Object.hasOwn(intents, picked) ? picked : carried;
   const intent = chosen && Object.hasOwn(intents, chosen) ? chosen : p?.intent ?? 'looking_for_room';
   const editing = Boolean(p && p.status !== 'draft');
   const start = today();
