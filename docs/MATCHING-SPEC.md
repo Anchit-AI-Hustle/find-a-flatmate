@@ -3,8 +3,8 @@
 _November 2026 · Describes `lib/matching.ts`, `scoringVersion = '1.0.0'`_
 
 Compatibility is computed in TypeScript on the server at render time. Nothing is stored: there is no score column
-in the database. The database separately enforces a smaller set of hard rules when interest is sent
-(`interest_transition`); section 9 lists where the two differ.
+in the database. The database separately enforces the hard rules when interest is sent (`interest_transition`,
+as replaced in `20261112160000_hardening.sql`); section 9 compares the two.
 
 Two functions exist: `matchPeople(a, b)` for person to person, and `matchRoom(person, room)` for person to listing.
 Both return the same result shape. All money is integer paise. Dates are `YYYY-MM-DD` strings compared as text.
@@ -42,7 +42,8 @@ Otherwise `score = min(100, round(base + lifestyle + extra))`.
 | Seeker owns the listing | — | yes | `Own listing` |
 | Listing monthly cost is above the seeker's maximum budget | — | yes | `Listed recurring cost exceeds budget` |
 | Seeker's planned stay is shorter than the listing minimum | — | yes | `Minimum stay exceeds your plans` |
-| An expectation marked dealbreaker is not met | both directions | seeker's expectations only | `Dealbreaker: <dimension title>` |
+| An expectation marked dealbreaker is not met | both directions | seeker's expectation against the household's habit | `Dealbreaker: <dimension title>` |
+| The household's dealbreaker expectation is not met by the seeker's habit | — | yes | `Household dealbreaker: <dimension title>` |
 
 Listing monthly cost = rent + maintenance + utilities + other recurring charges. Unknown utilities count as zero.
 
@@ -83,6 +84,11 @@ Points per dimension = weight × (fits ÷ comparisons).
 - **People:** 2 comparisons per dimension (A's want vs B's habit, and B's want vs A's habit). One fit earns half.
 - **Room:** 1 comparison per dimension (seeker's want vs household habit).
 
+For rooms there is one extra check outside the comparisons: if the household's answer has strength
+`dealbreaker`, a `want`, and the seeker has a `habit` that differs from it, the result gets the hard fail
+`Household dealbreaker: <title>`. This check changes nothing else: it earns or loses no points, adds no friction
+line and does not affect coverage. Household expectations with strength `preference` or `flexible` are ignored.
+
 A dimension adds a reason `Compatible expectations for <title>.` only when every comparison was made, every
 comparison fit, and the first argument's `want` literally equals the other side's `habit`. A fit that exists only
 because someone is flexible earns points but no reason line.
@@ -116,28 +122,34 @@ reason line appears only from the first argument's point of view.
 
 | Topic | People | Room |
 |---|---|---|
-| Lifestyle direction | Both directions | Seeker's expectations against household habits only. Household expectations of the seeker are **not** scored |
+| Lifestyle direction | Both directions | Points come only from the seeker's expectations against household habits. Household expectations of the seeker are not scored, but a household **dealbreaker** the seeker's habit breaks is a hard fail |
 | Budget | Range overlap | Monthly cost against the seeker's maximum only; the minimum is ignored |
 | Unknown utilities | not applicable | 10 points instead of 20, friction line, `Utility estimate` missing, confidence capped at `medium` |
 | Stay | Friction only | Hard fail when the seeker's stay is shorter than the minimum |
 | Extra reason | `Your monthly budget ranges overlap.` | `Estimated monthly cost is within your maximum budget.` |
 
-## 9. Where the database differs
+## 9. How this lines up with the database
 
-These are enforced by `interest_transition` when someone presses "interested", regardless of the score shown.
-Confirmed by running the migrations locally on 12 November 2026.
+`interest_transition` enforces hard rules when someone presses "interested", regardless of the score shown.
+The comparison below was re-checked on 12 November 2026 by running all three migrations locally.
 
-| # | TypeScript | SQL | Effect for a member |
+| Rule | TypeScript | SQL | Aligned? |
 |---|---|---|---|
-| 1 | `matchRoom` ignores household expectations | With a `listing`, dealbreakers are checked in **both** directions | A room can show a score, even 100, and still be refused with "A household rule conflicts with a dealbreaker" |
-| 2 | `matchRoom` hard-fails on cost, locality, dates and stay for that listing | A like passes if **either** the two profiles overlap **or** the listing criteria are met | An over-budget room can be liked when the two profiles overlap |
-| 3 | Hard fails always apply | Overlap is not re-checked when the other person has already sent interest | A like-back can succeed where the screen says "Not a fit" |
-| 4 | — | With any `listing` id supplied, the person-to-person dealbreaker check is skipped and the id is not tied to the target | See THREAT-MODEL gap G2 |
+| People: same city, shared locality, budget overlap, date overlap | Hard fails in `matchPeople` | Required for a like without a `listing` | Yes |
+| People: dealbreakers | Both directions | Both directions | Yes |
+| Room: city, locality, monthly cost ≤ maximum, date overlap, stay ≥ minimum | Hard fails in `matchRoom` | Required for a like with a `listing`; the listing must be live and owned by the target | Yes |
+| Room: dealbreakers | Seeker's and household's | Seeker's and household's | Yes |
+| Own listing, same account | Hard fails | "Candidate unavailable" | Yes |
+| Like-back | Hard fails still shown | When the other person has already sent interest, overlap and listing fit are **not** re-checked; dealbreakers still are | **No** |
+| People: different lengths of stay | Friction only | Not checked | Yes |
+
+The one remaining difference: a member can accept incoming interest from someone the screen marks "Not a fit"
+on location, budget, dates or (with a listing) cost and stay. See THREAT-MODEL G25.
 
 ## 10. Worked examples
 
-Weights used: lifestyle dimension 40/11 = 3.636; logistics dimension 10/3 = 3.333. Each example was also run
-through the code; results matched.
+Weights used: lifestyle dimension 40/11 = 3.636; logistics dimension 10/3 = 3.333. Each example was run through
+the code again after the household-dealbreaker change; results still match (90, 71, 86).
 
 ### Example 1 — two people, complete answers → 90, high
 
@@ -204,7 +216,12 @@ utilities unknown, other recurring ₹500; deposit ₹28,000; fees ₹1,000. Hou
 Coverage 14/14 but `Utility estimate` is missing → `medium`. Move-in cash shown on the receipt:
 16,000 + 28,000 + 0 + 1,000 = ₹45,000 before utilities.
 
-Variant: if the seeker marks guests as `dealbreaker`, the result is `score: null` with `Dealbreaker: Guests`.
+Variants, both run through the code:
+
+- The seeker marks guests as `dealbreaker`: `score: null` with `Dealbreaker: Guests`.
+- Instead, the household marks its guests rule (`Occasional daytime guests`) as `dealbreaker`, and the seeker's
+  habit is `Overnight guests`: `score: null` with `Household dealbreaker: Guests`.
+- The same household rule at strength `preference` changes nothing: the score stays 86.
 
 ## 11. Changing the rules safely
 
@@ -214,8 +231,8 @@ Variant: if the seeker marks guests as `dealbreaker`, the result is `score: null
 3. A dimension or option change touches three places: `dimensions` and `titles` in `lib/catalog.ts`, and the
    catalogue inside `private.answers_valid` (new migration). They are identical today and must stay so.
 4. Bump `scoringVersion`: patch for wording, minor for weights or thresholds, major for hard-fail rules.
-5. Update `lib/matching.test.ts` (it pins 100 for a full match and 90 for unknown utilities) and the three
-   examples above.
+5. Update `lib/matching.test.ts` (it pins 100 for a full match, 90 for unknown utilities, and the household
+   dealbreaker hard fail) and the three examples above.
 6. If a hard-fail rule changes, change `interest_transition` in a new migration in the same release, and update
    section 9.
 7. `ranking_feedback` rows do not record the scoring version. Add that column before using feedback to compare
