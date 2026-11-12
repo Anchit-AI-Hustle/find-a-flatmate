@@ -69,3 +69,21 @@ describe('matchRoom', () => {
     expect(r.score).toBe(90);
   });
 });
+
+describe('household rules', () => {
+  it('treats the household’s own dealbreaker about a flatmate as a hard fail', () => {
+    const rules: Answers = { ...agreeing, pets: { habit: dimensions.pets[0], want: dimensions.pets[0], strength: 'dealbreaker' } };
+    const petOwner: Answers = { ...agreeing, pets: { habit: dimensions.pets[1], want: dimensions.pets[0], strength: 'flexible' } };
+    const r = matchRoom(person({ answers: petOwner }), room({ rules }));
+    expect(r.score).toBeNull();
+    expect(r.hard_fail_reasons).toContain('Household dealbreaker: Pets');
+  });
+  it('never lets a skipped answer raise a score', () => {
+    const partial: Answers = { sleep: agreeing.sleep, noise: agreeing.noise, cleanliness: agreeing.cleanliness, cooking: agreeing.cooking };
+    const full = matchPeople(person(), person({ id: 'b' }));
+    const skipped = matchPeople(person({ answers: partial }), person({ id: 'b' }));
+    expect(skipped.score!).toBeLessThan(full.score!);
+    expect(skipped.confidence).not.toBe('high');
+    expect(skipped.missing_answers.length).toBe(10);
+  });
+});

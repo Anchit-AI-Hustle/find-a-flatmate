@@ -37,3 +37,5 @@ export function totals(c:Costs) {
   const monthly = c.rent+c.maintenance+(c.utilities??0)+c.recurring;
   return {monthly, initial:monthly+c.deposit+c.brokerage+c.fees, incomplete:c.utilities===null};
 }
+/** Request time for server-rendered pages (kept out of component bodies so renders stay pure). */
+export const nowMs = () => Date.now();

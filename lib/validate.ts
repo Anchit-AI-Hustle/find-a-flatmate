@@ -7,20 +7,23 @@ export const intent=z.enum(Object.keys(intents) as [keyof typeof intents,...(key
 export const roomType=z.enum(Object.keys(roomTypes) as [keyof typeof roomTypes,...(keyof typeof roomTypes)[]]);
 const plain=(min:number,max:number)=>z.string().trim().min(min).max(max).regex(/^[^<>]*$/);
 const day=z.iso.date();
+const within180=(from:string,until:string)=>Date.parse(until)-Date.parse(from)<=180*864e5;
 const num=(min:number,max:number)=>z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(min).max(max));
 export const paise=z.string().regex(/^\d{1,6}(\.\d{1,2})?$/).transform(s=>{const [a,b='']=s.split('.');return Number(a)*100+Number(b.padEnd(2,'0'));}).pipe(z.number().int().min(0).max(50_000_000));
 const checkbox=z.union([z.literal('on'),z.null()]).transform(v=>v==='on');
 const checked=z.literal('on').transform(()=>true);
 const scope=z.object({city,areas:z.array(z.string()).min(1).max(4)}).refine(v=>v.areas.every(a=>Object.hasOwn(cities[v.city].areas,a)),{message:'Choose localities in the selected city'});
 const basics=z.object({name:plain(2,60),city,areas:z.array(z.string()),min:paise,max:paise,from:day,until:day,months:num(1,36),intent,adult:checked,terms:checked})
- .refine(v=>scope.safeParse(v).success&&v.min<=v.max&&v.from<=v.until,{message:'Check the locality, budget and dates'});
+ .refine(v=>scope.safeParse(v).success&&v.min<=v.max&&v.from<=v.until,{message:'Check the locality, budget and dates'})
+ .refine(v=>within180(v.from,v.until),{message:'Keep your move-in window within 180 days'});
 const listing=z.object({
  id:uuid.nullable(),title:plain(8,90),description:plain(10,1200),city_id:city,locality_id:z.string(),room_type:roomType,
  building:z.enum(['Society apartment','Independent floor','Standalone building','Other']),furnishing:z.enum(['Unfurnished','Semi-furnished','Furnished']),
  bath_sharing:z.enum(['Private','Shared']),rooms:num(1,20),bathrooms:num(1,20),occupants:num(0,20),capacity:num(1,20),poster_type:z.enum(['Occupant','Owner']),attested:checked,
  transport:plain(0,300),restrictions:plain(0,300),rent:paise.refine(p=>p>=100),maintenance:paise,utilities:z.union([z.literal('').transform(()=>null),paise]),
  recurring:paise,deposit:paise,brokerage:paise,fees:paise,available_from:day,available_until:day,min_months:num(1,36),amenities:z.array(z.enum(amenities)).max(7),
-}).refine(v=>v.capacity>v.occupants&&v.available_until>=v.available_from&&Object.hasOwn(cities[v.city_id].areas,v.locality_id),{message:'Check occupancy, locality and availability dates'});
+}).refine(v=>v.capacity>v.occupants&&v.available_until>=v.available_from&&Object.hasOwn(cities[v.city_id].areas,v.locality_id),{message:'Check occupancy, locality and availability dates'})
+ .refine(v=>within180(v.available_from,v.available_until),{message:'Keep the availability window within 180 days'});
 export function readAnswers(form:FormData):Answers {
   const output:Answers={};
   for(const key of Object.keys(dimensions) as (keyof typeof dimensions)[]){

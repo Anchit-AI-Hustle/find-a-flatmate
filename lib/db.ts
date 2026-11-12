@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { authReady, supabaseKey, supabaseUrl } from './env';
-import type { Answers, Person } from './matching';
+import type { Answers, Person, Room } from './matching';
 import type { Costs } from './catalog';
 
 export const server = cache(async () => {
@@ -62,7 +62,12 @@ export async function requireSession() {
 export async function requireProfile() {
   const s=await requireSession();
   const p=await profile();
-  if(!p||p.status==='draft') redirect('/onboarding/intent');
+  if(!p) redirect('/onboarding/intent');
+  if(p.status==='draft') {
+    // Resume onboarding where the member left off.
+    const {data}=await s.db.from('onboarding_progress').select('step').eq('user_id',s.user.id).maybeSingle<{step:string}>();
+    redirect(data?.step==='preferences'?'/onboarding/preferences':'/onboarding/lifestyle');
+  }
   if(p.status==='suspended'||p.status==='closed') redirect('/app/settings/data');
   return {...s,profile:p};
 }
@@ -83,4 +88,32 @@ export async function rooms(city:string,locality?:string,id?:string) {
   if(!db) return null;
   const {data,error}=await db.rpc('public_rooms',{city,locality,room_id:id}).overrideTypes<PublicRoom[],{merge:false}>();
   return error?null:data;
+}
+
+/** Cookie-less anonymous client so public pages stay cacheable; it can only call anon-granted RPCs. */
+export const publicDb = () => authReady ? createClient(supabaseUrl!,supabaseKey!,{auth:{persistSession:false,autoRefreshToken:false}}) : null;
+/** Honest live room counts per city; null when the database is not configured or unreachable. */
+export async function inventory():Promise<Record<string,number>|null> {
+  const db=publicDb();
+  if(!db) return null;
+  const {data,error}=await db.rpc('public_inventory');
+  if(error||!Array.isArray(data)) return null;
+  return Object.fromEntries((data as {city_id:string;live_rooms:number}[]).map(r=>[r.city_id,Number(r.live_rooms)]));
+}
+export async function publicRooms(city?:string,locality?:string,id?:string):Promise<PublicRoom[]|null> {
+  const db=publicDb();
+  if(!db) return null;
+  const {data,error}=await db.rpc('public_rooms',{city,locality,room_id:id});
+  return error?null:(data??[]) as PublicRoom[];
+}
+/** The signed-in, onboarded member with their own answers shaped for matching. */
+export async function me() {
+  const s=await requireProfile();
+  const {data}=await s.db.rpc('own_answers');
+  const answers=(data??{}) as Answers;
+  return {...s,answers,person:person(s.profile,answers)};
+}
+export function room(l:Listing):Room {
+  return {ownerId:l.owner_id,city:l.city_id,areas:[l.locality_id],from:l.available_from,until:l.available_until,months:l.min_months,
+    costs:{rent:l.rent,maintenance:l.maintenance,utilities:l.utilities,recurring:l.recurring,deposit:l.deposit,brokerage:l.brokerage,fees:l.fees},rules:answerMap(l.household_preferences??[])};
 }

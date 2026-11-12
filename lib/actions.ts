@@ -20,7 +20,7 @@ function friendly(error:{code?:string;message:string}){
 const defaultPath = '/app';
 export async function selectIntent(raw:string){
   const intent=z.enum(['looking_for_room','have_room','find_together']).safeParse(raw);
-  if(intent.success) (await cookies()).set('ff_intent',intent.data,{httpOnly:true,sameSite:'lax',maxAge:3600,path:'/'});
+  if(intent.success) (await cookies()).set('ff_intent',intent.data,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:3600,path:'/'});
   redirect(await session()?'/onboarding/basics':'/login');
 }
 export async function login(_:State,f:FormData):Promise<State>{
@@ -41,7 +41,18 @@ function parse<T extends z.ZodType>(schema:T,f:FormData,nullable:string[]=[],ext
  for(const key of nullable) if(!vals[key]) vals[key]=null;
  return schema.parse({...vals,...extra});
 }
-type Op='basics'|'lifestyle'|'privacy'|'listing'|'listingState'|'interest'|'save'|'block'|'report'|'message'|'visit'|'location'|'request'|'moderate'|'evidence'|'waitlist'|'feedback'|'found'|'upload'|'removePhoto';
+/** Best-effort removal of a closing member's stored listing photos (the files, not only the rows). */
+async function removePhotos(owner:string){
+ const backend=service();
+ if(!backend) return;
+ const bucket=backend.storage.from('room-photos');
+ const {data:folders}=await bucket.list(owner,{limit:100});
+ for(const folder of folders??[]){
+  const {data:files}=await bucket.list(owner+'/'+folder.name,{limit:100});
+  if(files?.length) await bucket.remove(files.map(f=>owner+'/'+folder.name+'/'+f.name));
+ }
+}
+export type Op='basics'|'lifestyle'|'privacy'|'listing'|'listingState'|'interest'|'save'|'block'|'report'|'message'|'visit'|'location'|'request'|'moderate'|'evidence'|'waitlist'|'feedback'|'found'|'upload'|'removePhoto';
 export async function action(op:Op, _:State,f:FormData):Promise<State>{
  const auth=await session();
  if(!auth) return {error:'Sign in again to continue.'};
@@ -73,7 +84,7 @@ export async function action(op:Op, _:State,f:FormData):Promise<State>{
   case 'message':await rpc('send_message',parse(forms.message,f));result={success:'Message sent.'};break;
   case 'visit':await rpc('visit_transition',parse(forms.visit,f,['v','at_time']));result={success:'Visit updated.'};break;
   case 'location':await rpc('visit_location',parse(forms.location,f,['location']));break;
-  case 'request':{const {kind,details}=parse(forms.request,f,['details','confirm']);await rpc('data_request',{kind,details});result={success:kind==='delete'?'Account closed. A deletion request is in the privacy queue.':'Your request is in the support queue.'};break;}
+  case 'request':{const {kind,details}=parse(forms.request,f,['details','confirm']);await rpc('data_request',{kind,details});if(kind==='delete') await removePhotos(user.id);result={success:kind==='delete'?'Account closed. A deletion request is in the privacy queue.':'Your request is in the support queue.'};break;}
   case 'moderate':await rpc('moderate',parse(forms.moderate,f));break;
   case 'evidence':{const body=await rpc('review_reported_message',parse(forms.evidence,f));result={success:'Evidence access was recorded.',evidence:z.string().parse(body)};break;}
   case 'waitlist': await rpc('join_waitlist');result={success:'Your interest in more availability in this city was saved.'};break;
