@@ -45,7 +45,7 @@ export const forms={
  interest:z.object({target:uuid,action:z.enum(['like','pass','withdraw','reset']),listing:uuid.nullable()}),
  save:z.object({kind:z.enum(['listing','profile']),target:uuid,enabled:z.enum(['yes','no']).transform(x=>x==='yes')}),
  block:z.object({target:uuid,confirm:checked}),
- report:z.object({subject:uuid.nullable(),listing:uuid.nullable(),message:uuid.nullable(),category:z.enum(['scam','harassment','underage','stale','privacy','appeal','other']),details:plain(5,1200),also_block:checkbox}),
+ report:z.object({subject:uuid.nullable(),listing:uuid.nullable(),message:uuid.nullable(),category:z.enum(['scam','harassment','underage','stale','privacy','other']),details:plain(5,1200),also_block:checkbox}),
  message:z.object({c:uuid,body:z.string().trim().min(1).max(1500),request_key:uuid}),
  visit:z.object({c:uuid,v:uuid.nullable(),action:z.enum(['request','confirm','decline','reschedule','cancel','completed','no_show']),at_time:z.iso.datetime({local:true}).transform(v=>v.length===16?v+':00+05:30':v+'+05:30').nullable()}),
  location:z.object({c:uuid,v:uuid,location:plain(4,300).nullable()}),

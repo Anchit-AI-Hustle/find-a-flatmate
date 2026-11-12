@@ -15,7 +15,10 @@ starting targets set without baseline data**; revise them after stage 1 and reco
 ## Stage 0 — Readiness gate (go / no-go before any member is invited)
 
 - [ ] Production database provisioned and both migrations applied (blocked today; see COST-AND-LIMITS.md).
-- [ ] THREAT-MODEL gaps G1, G2, G3, G6, G7 and G8 fixed, or accepted in writing by the owner.
+- [ ] THREAT-MODEL open gaps reviewed: G6 (erasure), G9 (script-readable session), G11 (sign-in bot protection)
+      and G27 (export completeness) fixed, or accepted in writing by the owner. G1–G4, G7, G8, G10, G12, G13 and
+      G21 were fixed in the hardening migration.
+- [ ] `CRON_SECRET` and the service key set in production so the daily expiry job runs.
 - [ ] Legal review of the DPDP checklist in PRIVACY-AND-SAFETY.md, and of the terms and privacy pages.
 - [ ] At least one named moderator, with a target of reviewing listings within 24 hours.
 - [ ] Sign-in email deliverability tested on a custom SMTP sender (the built-in sender is too limited for a pilot).
@@ -91,7 +94,8 @@ Seed supply before demand: do not invite seekers to a locality until it has live
 ### Funnel
 
 Target funnel, in order, and what the code records **today**. Recorded events go to `product_events` through
-`private.event_for`, which writes **only for members who opted in to analytics** (off by default).
+`private.event_for`, which writes **only for members who opted in to analytics** (off by default). The hardening
+migration did not add, remove or move any event.
 
 | Step | Recorded today? | How |
 |---|---|---|

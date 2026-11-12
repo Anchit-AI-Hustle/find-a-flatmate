@@ -71,7 +71,7 @@ Details and journeys: [PERSONAS-JOURNEYS.md](PERSONAS-JOURNEYS.md).
 | Visit scheduling with time-limited address sharing | `visit_transition`, `visit_location`, `read_visit_location` |
 | Save, block, report | `save_item`, `block_account`, `file_report` |
 | Moderation queue with logged, justified access to reported messages | `moderate`, `review_reported_message` |
-| Privacy controls and data requests (export, delete, support) | `save_privacy`, `data_request` |
+| Privacy controls, self-serve data export, and data requests (delete, support) | `save_privacy`, `GET /app/settings/data/export`, `data_request` |
 | Public city, locality and listing pages with limited fields | `public_rooms`, `public_inventory` |
 | Installable PWA | `app/manifest.ts`, `public/sw.js` |
 
@@ -81,8 +81,8 @@ Details and journeys: [PERSONAS-JOURNEYS.md](PERSONAS-JOURNEYS.md).
 |---|---|
 | Household groups (shared shortlist, group compatibility) | Not implemented. `feature_flags.household_groups` is off; `/app/group` says so; `join_waitlist` records city interest |
 | Visit and renewal reminders | Preference is stored (`notification_preferences.reminders`); sending is not implemented |
-| Scheduled listing expiry and storage clean-up | `expire_rooms()` exists but nothing calls it; see THREAT-MODEL gaps |
-| Erasure tooling for delete requests | Not implemented beyond account closure |
+| Storage clean-up | Photo files are deleted on account closure only; not when a listing is filled or removed. (Listing expiry is now scheduled daily through `/api/cron/expire`) |
+| Erasure tooling for delete requests | Not implemented. Closure hides data and deletes photo files; rows and the Auth user are erased by an operator by hand |
 | More localities, phone verification, unblock, realtime chat | Not implemented |
 
 ### P2 — only if validated
@@ -133,5 +133,6 @@ about any of them.**
 ## 10. Open risks
 
 - Production database is not provisioned yet (see COST-AND-LIMITS.md).
-- Several safety and privacy gaps are known and listed in THREAT-MODEL.md, "Gaps found".
+- A hardening migration closed most gaps from the first review; the rest are listed in THREAT-MODEL.md,
+  "Open gaps".
 - DPDP Act 2023 obligations have not had legal review (see PRIVACY-AND-SAFETY.md).

@@ -31,7 +31,7 @@ Sources: <https://supabase.com/pricing>, <https://supabase.com/docs/guides/platf
 | Active projects | "Limit of 2 active projects." The billing page says two free projects, counted across all organisations where you are Owner or Administrator; paused projects do not count | **Currently blocks production** |
 | Database | 500 MB, shared CPU, 500 MB RAM | Messages, events and rate-limit counters are never purged |
 | Monthly active users | 50,000 | Far above pilot scale |
-| File storage | 1 GB | Listing photos; files are never deleted today (THREAT-MODEL G6) |
+| File storage | 1 GB | Listing photos; files are deleted only when a draft photo is removed or the account is closed (THREAT-MODEL G6) |
 | Maximum upload size | 50 MB | The app stores at most 750,000 bytes per photo |
 | Egress | 5 GB, plus 5 GB cached egress | Every photo view is an uncached download through the media route |
 | Inactivity | "Free projects are paused after 1 week of inactivity." | A quiet pilot week can take the database offline |
@@ -68,7 +68,7 @@ Sources: <https://vercel.com/pricing>, <https://vercel.com/docs/limits>,
 | Image optimisation | 5K transformations/month | Not used; artwork is pre-optimised WebP and photos bypass the optimiser |
 | Deployments | 100 per day | |
 | Build | 45 minutes per deployment, 1 concurrent | |
-| Cron jobs | 100 per project; on Hobby at most once per day, with per-hour precision | Enough for a daily `expire_rooms` job if one is added |
+| Cron jobs | 100 per project; on Hobby at most once per day, with per-hour precision | One job is configured: `/api/cron/expire` at `30 20 * * *` UTC, so it may run up to 59 minutes late. It needs `CRON_SECRET` and the service key |
 | Runtime logs | 1 hour | Very short window for debugging |
 | Seats | 1 developer | |
 
@@ -95,7 +95,7 @@ These are arithmetic on the figures above, not measurements.
 | Sign-in email | 2 emails per hour project-wide means two people can sign in per hour on the built-in sender |
 | Chat polling | One open chat refreshes every 7 seconds: about 514 requests an hour. One million invocations is about 1,900 open-chat hours a month, before any other traffic |
 | Photo egress | Photos are served uncached by design. At the 750,000-byte cap, 5 GB is about 6,600 photo views a month; smaller files go further |
-| Photo storage | Six photos at the cap is 4.5 MB per listing, so 1 GB holds roughly 220 fully loaded listings, and files are never deleted |
+| Photo storage | Six photos at the cap is 4.5 MB per listing, so 1 GB holds roughly 220 fully loaded listings, and files of filled or removed listings are not deleted |
 | Inactivity pause | One week without activity pauses a free Supabase project |
 | No backups, short logs | A mistake in production has no restore point, and evidence disappears within an hour (Vercel) or a day (Supabase) |
 | Commercial use | Hobby terms rule out monetisation experiments without a plan change |
