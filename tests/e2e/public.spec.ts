@@ -15,6 +15,7 @@ test('public pages render at every width with no overflow, console errors or acc
       expect(response?.status(), `${path} @${width}`).toBe(200);
       await expect(page.locator('h1')).toHaveCount(1);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `no horizontal scroll on ${path} @${width}`).toBe(true);
+      expect(await page.locator('h1').evaluate(el => el.getBoundingClientRect().left), `side gutter on ${path} @${width}`).toBeGreaterThanOrEqual(12);
       if (width === 390 || width === 1440) {
         const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
         expect(axe.violations.map(v => `${v.id}: ${v.nodes[0]?.target}`), `axe on ${path} @${width}`).toEqual([]);

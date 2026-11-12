@@ -70,6 +70,8 @@ export default async function Discover({ searchParams }: { searchParams: Promise
       </article>
     ));
   }
+  const shown = cards.length;
+  cards = cards.slice(0, 40);
   const params = (extra: Record<string, string>) => '?' + new URLSearchParams({ ...Object.fromEntries(Object.entries(q).filter(([, v]) => v)), ...extra }).toString();
   const filtered = Boolean(q.area || q.max || q.type || q.intent || q.amenity);
   return (
@@ -103,7 +105,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
           <div className="field"><button className="btn small">Apply</button></div>
         </form>
       </details>
-      <p className="small muted" role="status">{cards.length} shown{hidden ? <> · {hidden} hidden because budget, dates, locality or a dealbreaker don’t line up. <Link href={params({ all: '1' })}>Show them anyway</Link></> : null}</p>
+      <p className="small muted" role="status">{shown > cards.length ? `Showing the ${cards.length} best fits of ${shown}. Use the filters to narrow down.` : `${cards.length} shown`}{hidden ? <> · {hidden} hidden because budget, dates, locality or a dealbreaker don’t line up. <Link href={params({ all: '1' })}>Show them anyway</Link></> : null}</p>
       {cards.length ? <div className="grid two" style={{ marginTop: 12 }}>{cards}</div> : (
         <div className="card empty">
           <Art name="together" width={960} height={720} />

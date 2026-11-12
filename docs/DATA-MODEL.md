@@ -1,7 +1,8 @@
 # Data Model
 
-_November 2026 · Source: `supabase/migrations/20261112121832_foundation.sql` (schema, RLS, bucket) and
-`20261112121833_workflows.sql` (RPCs)_
+_November 2026 · Source: `supabase/migrations/20261112121832_foundation.sql` (schema, RLS, bucket),
+`20261112121833_workflows.sql` (RPCs) and `20261112160000_hardening.sql` (replacements for eight RPCs; no table
+changes)_
 
 ## 1. Ground rules
 
@@ -28,7 +29,7 @@ _November 2026 · Source: `supabase/migrations/20261112121832_foundation.sql` (s
 Text columns with `CHECK` lists: answer `strength` (`flexible`, `preference`, `dealbreaker`); `room_type`
 (`private_room`, `shared_room`, `entire_flat`, `other`); `building`; `furnishing`; `bath_sharing`; `poster_type`
 (`Occupant`, `Owner`); amenity (7 values); report `category` (`scam`, `harassment`, `underage`, `stale`,
-`privacy`, `appeal`, `other`); data request `kind` (`export`, `delete`, `support`) and `status` (`pending`,
+`privacy`, `appeal`, `other`; `appeal` is no longer offered or usable for a self-report); data request `kind` (`export`, `delete`, `support`) and `status` (`pending`,
 `fulfilled`); consent `purpose` (`terms`, `analytics`); onboarding `step` (`lifestyle`, `preferences`, `complete`).
 
 ## 3. Tables
@@ -145,7 +146,7 @@ Storage: private bucket `room-photos`, 750,000-byte limit, `image/webp` only, no
 | From | To | Trigger |
 |---|---|---|
 | (none) | `draft` | `save_basics`, first call |
-| `draft` | `active` | `save_privacy` with `status = active`. No other value is accepted from draft |
+| `draft` | `active` | `save_privacy` with `status = active`. No other value is accepted from draft. Requires onboarding progress `preferences`, which is set by `save_lifestyle` (an empty answer set counts as skipping) |
 | `active` | `paused` | `save_privacy` with `status = paused` |
 | `paused` | `active` | `save_privacy` with `status = active` |
 | `draft`, `active`, `paused` | `suspended` | `moderate('profile', …, 'suspend')` |
@@ -162,11 +163,12 @@ can discover, be discovered, read other people's listings, send interest, chat, 
 | (none) | `draft` | Owner, `save_listing(null, …)` | Active profile; at most 8 open listings; 5 creations a day; no similar title in the same locality |
 | `draft`, `pending_review`, `active`, `paused`, `expired` | `draft` | Owner, `save_listing(id, …)` | Any edit clears `reviewed_at`, `confirmed_at`, `expires_at` |
 | `draft` | `pending_review` | Owner, `submit` | At least one photo; `available_until` ≥ today; sets `confirmed_at` |
-| `pending_review` | `active` | Moderator, `approve` | Not own listing; owner active; `available_until` ≥ today; sets `reviewed_at`; `expires_at` = earlier of `confirmed_at + 21 days` and the end of `available_until` |
+| `pending_review` | `active` | Moderator, `approve` | Not own listing; owner active; `available_until` ≥ today; sets `reviewed_at`; `expires_at` = earlier of approval time + 21 days and the end of `available_until` |
 | `pending_review` | `draft` | Moderator, `reject` | |
 | `active` | `paused` | Owner, `pause` | |
-| `active`, `paused`, `expired` | `active` | Owner, `renew` | Was reviewed; `available_until` ≥ today; sets `confirmed_at`; `expires_at` = earlier of now + 21 days and end of availability; logs a reconfirmation |
-| `active` | `expired` | Moderator, `expire`; or `expire_rooms()` once `expires_at` has passed | `expire_rooms()` is not scheduled anywhere |
+| `active`, `paused`, `expired` | `active` | Owner, `renew` | `reviewed_at` is set (so not after a moderator expiry); `available_until` ≥ today; sets `confirmed_at`; `expires_at` = earlier of now + 21 days and end of availability; logs a reconfirmation |
+| `active` | `expired` | Moderator, `expire` | Clears `reviewed_at`. The owner cannot renew; they must edit (back to `draft`) and pass review again |
+| `active` | `expired` | `expire_rooms()`, once `expires_at` has passed | Run daily by `/api/cron/expire`. Keeps `reviewed_at`, so the owner can renew |
 | `pending_review`, `active`, `paused`, `expired` | `removed` | Moderator, `remove` | Terminal |
 | `draft`, `pending_review`, `active`, `paused`, `expired` | `filled` | Owner, `fill` | Terminal; records `home_found_self_reported` if consented |
 | any except `filled`, `removed` | `removed` | Owner closes the account | |
@@ -178,7 +180,7 @@ members even while its status still reads `active`.
 
 | From | To | Action | Conditions |
 |---|---|---|---|
-| none, `passed`, `withdrawn` | `sent` | `like` | Both active, not blocked; the other side has not passed; overlap and dealbreaker checks (API-CONTRACTS.md) |
+| none, `passed`, `withdrawn` | `sent` | `like` | Both active, not blocked; the other side has not passed; the target is discoverable, has already sent interest, or owns the live listing named; fit and dealbreaker checks (API-CONTRACTS.md) |
 | `sent` | `sent` | `like` | No change |
 | none, `sent`, `passed`, `withdrawn` | `passed` | `pass` | |
 | `sent` | `withdrawn` | `withdraw` | |
@@ -195,23 +197,25 @@ members even while its status still reads `active`.
 | `requested`, `rescheduled` | `confirmed` | The member who did **not** propose the current time | Start is still in the future |
 | `requested`, `rescheduled` | `declined` | The member who did not propose | Terminal |
 | `requested`, `rescheduled`, `confirmed` | `rescheduled` | Either | New time in the same window; the actor becomes the proposer |
-| `requested`, `rescheduled`, `confirmed` | `cancelled` | Either | Terminal |
+| `requested`, `rescheduled`, `confirmed` | `cancelled` | Either, with `cancel`; or automatically when one blocks the other | Terminal |
 | `confirmed` | `completed` or `no_show` | Either | Only once the start time has passed. Terminal |
 
 Every transition appends a `visit_events` row. The shared address is deleted whenever the new state is not
-`confirmed`. Blocking does not change a visit's state.
+`confirmed`. `block_account` cancels every open visit between the two people, deletes its address and appends a
+`cancelled` event.
 
 ### Report
 
 | From | To |
 |---|---|
-| (none) | `open` (`file_report`) |
+| (none) | `open` (`file_report`). The target may be a message in any conversation the reporter belongs to, a person the reporter can see or has matched with, or a listing the reporter can currently read |
 | `open` | `investigating` |
 | `investigating` | `resolved`, `dismissed`, `escalated` |
 | `escalated` | `resolved`, `dismissed` |
 
 ### Smaller machines
 
-- Onboarding: `lifestyle → preferences → complete`. Used for resume only; activation does not require it.
-- Data request: `pending → fulfilled` for `export` and `support` via `moderate('request', …)`. This call
-  currently fails (THREAT-MODEL gap G3). `delete` requests cannot be marked fulfilled.
+- Onboarding: `lifestyle → preferences → complete`. `save_basics` sets `lifestyle`; `save_lifestyle` moves it to
+  `preferences`; activation in `save_privacy` requires `preferences` and sets `complete`.
+- Data request: `pending → fulfilled` for `export` and `support` via `moderate('request', …, 'fulfill')`.
+  `delete` requests cannot be marked fulfilled in the app; an operator completes them outside it.

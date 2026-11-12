@@ -28,7 +28,7 @@ a:hover { color: var(--ink); }
 /* Layout */
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
 .narrow { max-width: 720px; margin: 0 auto; padding: 0 16px; }
-.section { padding: 48px 0; }
+.section { padding-block: 48px; }
 .stack > * + * { margin-top: 16px; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .between { justify-content: space-between; }
@@ -89,8 +89,8 @@ a:hover { color: var(--ink); }
 .site-foot a { color: var(--ink-soft); }
 
 /* Landing */
-.hero { display: grid; gap: 28px; padding: 28px 0 8px; align-items: center; }
-@media (min-width: 900px) { .hero { grid-template-columns: 1.05fr 1fr; gap: 48px; padding: 56px 0 24px; } }
+.hero { display: grid; gap: 28px; padding-block: 28px 8px; align-items: center; }
+@media (min-width: 900px) { .hero { grid-template-columns: 1.05fr 1fr; gap: 48px; padding-block: 56px 24px; } }
 .intent-cards { display: grid; gap: 10px; margin: 22px 0 10px; }
 .intent-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 14px 16px; border-radius: var(--radius); border: 1.5px solid var(--line-strong); background: var(--paper); cursor: pointer; font: inherit; color: inherit; min-height: 64px; }
 .intent-card:hover { border-color: var(--teal); background: var(--mint); }
@@ -109,7 +109,7 @@ a:hover { color: var(--ink); }
 @media (min-width: 800px) { .band { padding: 44px; } }
 
 /* Prose pages */
-.page-head { padding: 36px 0 8px; }
+.page-head { padding-block: 36px 8px; }
 .prose h2 { margin-top: 1.6em; }
 .prose h3 { margin-top: 1.4em; }
 .prose ul, .prose ol { padding-left: 1.2em; margin: 0 0 1em; }
