@@ -37,7 +37,7 @@ export async function logout(){
  redirect('/');
 }
 function parse<T extends z.ZodType>(schema:T,f:FormData,nullable:string[]=[],extra:Record<string,unknown>={}):z.output<T>{
- const vals=formFields(f);
+ const vals:Record<string,FormDataEntryValue|null>=formFields(f);
  for(const key of nullable) if(!vals[key]) vals[key]=null;
  return schema.parse({...vals,...extra});
 }
