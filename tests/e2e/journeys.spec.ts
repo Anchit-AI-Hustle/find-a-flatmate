@@ -57,8 +57,7 @@ test('poster signs up with a magic link, onboards and saves a draft listing with
   await p.getByLabel('Refundable deposit (one-time)').fill('31000');
   await p.getByRole('checkbox', { name: 'Wi-Fi' }).check();
   await p.getByLabel(/I confirm this vacancy is real/).check();
-  await p.locator('#smoking_habit').selectOption('No shared-space smoking');
-  await p.locator('#smoking_want').selectOption('No shared-space smoking');
+  await p.getByRole('group', { name: 'Smoking' }).getByRole('button', { name: 'No shared-space smoking' }).click();
   await p.getByRole('button', { name: 'Save draft' }).click();
   await expect(p).toHaveURL(/\/app\/listings\/[0-9a-f-]{36}\/edit/);
   listingId = p.url().match(/listings\/([0-9a-f-]{36})/)![1];
@@ -121,7 +120,7 @@ test('the approved listing is public with safe fields only', async () => {
 test('seeker onboards, finds the room with honest costs and fit reasons, saves it and shows interest', async () => {
   await signIn(s, ravi);
   await onboard(s, { name: R, intent: 'I’m looking for a room' });
-  await s.goto('/app/discover?mode=rooms');
+  await s.goto('/app/discover?mode=rooms&view=list');
   const card = s.locator('article').filter({ hasText: title });
   await expect(card.getByText('₹17,500')).toBeVisible();
   await expect(card.getByText('Your preferred localities overlap.')).toBeVisible();
@@ -138,10 +137,10 @@ test('seeker onboards, finds the room with honest costs and fit reasons, saves i
   await s.goto('/app/saved');
   await expect(s.getByRole('link', { name: title })).toBeVisible();
   // Filters that exclude it give an honest empty state.
-  await s.goto('/app/discover?mode=rooms&max=5000');
+  await s.goto('/app/discover?mode=rooms&max=5000&view=list');
   await expect(s.getByRole('heading', { name: 'No results for these filters' })).toBeVisible();
   // People tab: Asha appears with a symmetric explanation.
-  await s.goto('/app/discover');
+  await s.goto('/app/discover?view=list');
   await expect(s.locator('article').filter({ hasText: A }).getByText('Email verified')).toBeVisible();
 });
 
@@ -220,9 +219,9 @@ test('a payment request is flagged; the seeker reports the message and blocks, w
   await form.getByRole('button', { name: 'Send report' }).click();
   await expect(s).toHaveURL(/\/app\/matches/);
   for (const page of [s, p]) await gone(page, chatUrl);
-  await s.goto('/app/discover');
+  await s.goto('/app/discover?view=list');
   await expect(s.locator('article').filter({ hasText: A })).toHaveCount(0);
-  await s.goto('/app/discover?mode=rooms');
+  await s.goto('/app/discover?mode=rooms&view=list');
   await expect(s.locator('article').filter({ hasText: title })).toHaveCount(0);
 });
 
@@ -263,8 +262,8 @@ test('data persists across sign-out; the seeker can edit, export and close their
   await expect(s).toHaveURL(/\/app$/);
   await expect(s.getByRole('heading', { name: `Hello, ${R}` })).toBeVisible();
   await s.goto('/onboarding/lifestyle');
-  await expect(s.locator('#smoking_strength')).toHaveValue('dealbreaker');
-  await s.locator('#noise_habit').selectOption('Usually quiet');
+  await expect(s.locator('input[name="smoking_strength"]')).toHaveValue('dealbreaker');
+  await s.getByRole('group', { name: 'Noise' }).getByRole('button', { name: 'Usually quiet' }).click();
   await s.getByRole('button', { name: 'Save answers' }).click();
   await expect(s).toHaveURL(/\/app\/profile/);
   await expect(s.getByText('3 of 14 topics answered.')).toBeVisible();
@@ -280,7 +279,7 @@ test('data persists across sign-out; the seeker can edit, export and close their
   await s.getByLabel('Profile status').selectOption('paused');
   await s.getByRole('button', { name: 'Save choices' }).click();
   await expect(s.getByText('Saved.')).toBeVisible();
-  await o.goto('/app/discover');
+  await o.goto('/app/discover?view=list');
   await expect(o.locator('article').filter({ hasText: R })).toHaveCount(0);
   await s.goto('/app/settings/data');
   await axe(s, 'data and support');

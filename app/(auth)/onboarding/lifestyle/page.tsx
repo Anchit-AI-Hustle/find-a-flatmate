@@ -17,7 +17,7 @@ export default async function Lifestyle() {
     <div className="stack">
       {editing ? <p><Link href="/app/profile">← Back to profile</Link></p> : <ol className="stepper" aria-label="Step 3 of 4"><li className="done" /><li className="done" /><li className="done" /><li /></ol>}
       <h1>How you live</h1>
-      <p className="lede">Tell us your own habit and what you’d like in a home. Mark something a dealbreaker only if you truly couldn’t live with the alternative.</p>
+      <p className="lede">Tap what sounds like you. Skip anything.</p>
       <ActionForm op="lifestyle" submit={editing ? 'Save answers' : 'Continue'}>
         {editing ? <input type="hidden" name="editing" value="yes" /> : null}
         <LifestyleFields initial={(data ?? {}) as Answers} />

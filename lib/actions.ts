@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import {createHash,randomUUID} from 'node:crypto';
 import {cookies} from 'next/headers';
 
-export type State={error?:string;success?:string;evidence?:string};
+export type State={error?:string;success?:string;evidence?:string;match?:string};
 const success={success:'Saved.'};
 function friendly(error:{code?:string;message:string}){
   if(error.code==='P0001') return error.message;
@@ -78,7 +78,9 @@ export async function action(op:Op, _:State,f:FormData):Promise<State>{
    break;
   }
   case 'listingState':{const {id,action}=parse(forms.listingState,f);await rpc('listing_transition',{l:id,action});break;}
-  case 'interest':{const p=parse(forms.interest,f,['listing']); const c=await rpc('interest_transition',p);if(c)next='/app/messages/'+uuid.parse(c);result={success:p.action==='like'?'Interest sent. Chat opens when you both opt in.':'Connection preferences updated.'};break;}
+  case 'interest':{const p=parse(forms.interest,f,['listing']); const c=await rpc('interest_transition',p);const chat=c?uuid.parse(c):undefined;
+   // The swipe deck stays on the page and shows the match itself; other screens go straight to the chat.
+   if(chat&&f.get('stay')!=='yes')next='/app/messages/'+chat;result={success:p.action==='like'?'Interest sent. Chat opens when you both opt in.':'Connection preferences updated.',match:chat};break;}
   case 'save': await rpc('save_item',parse(forms.save,f));break;
   case 'block':{const {target}=parse(forms.block,f);await rpc('block_account',{target});next='/app/matches';break;}
   case 'report':{const p=parse(forms.report,f,['subject','listing','message','also_block']);await rpc('file_report',p);if(p.also_block) next='/app/matches';result={success:'Report received. Moderators can review it.'};break;}

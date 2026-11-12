@@ -142,3 +142,12 @@ Each entry records the decision, why, where it lives in code, and what it costs 
 - Every form posts to a server action and shows pending, error and success states (`ActionForm`).
 - Destructive actions (block, close account) need an explicit confirmation field.
 - Error messages are plain sentences from the database rule that was hit, or a generic fallback.
+
+## Swipe-first discovery and minimal text (12 November 2026)
+
+- **Decision:** Discover opens on a swipe deck (one card at a time) for both people and rooms. Like and pass are large icon buttons; drag and the arrow keys do the same; undo brings back the last pass; a mutual like shows a match screen with "Say hello". A list view stays one tap away for people who want to compare and filter.
+- **Why:** the owner asked for Tinder-like matching and far less text. Swiping is the interaction; the rest of the journey (fit reasons, full cost, mutual-interest chat, visits, moderation) is unchanged, so the product is still more than a swipe app.
+- **Guardrails kept:** only candidates that pass the hard checks appear in the deck; each card still shows the two best reasons and one difference; every swipe goes through the same `interest_transition` RPC as the list buttons.
+- **Lifestyle answers:** one tap per topic with emoji labels. The chosen option is stored as both the member's habit and what they would like; "must match" stores it as a dealbreaker. Stating a different expectation from your own habit is no longer possible in the UI (the data model still supports it).
+- **Avatars:** members have no photos, so each gets a simple drawn face generated from their id. It is decorative, not a likeness.
+- **Landing page:** reduced to a headline, three choices, four icon steps and three picture cards.

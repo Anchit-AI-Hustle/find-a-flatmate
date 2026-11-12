@@ -41,11 +41,10 @@ export async function onboard(page: Page, { name, intent, min = '12000', max = '
   await page.getByLabel(/I agree to the/).check();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/onboarding\/lifestyle/);
-  await page.getByLabel('My habit').first().selectOption('Early nights');
-  await page.getByLabel('I’d like my flatmates to be').first().selectOption('Early nights');
-  await page.locator('#smoking_habit').selectOption('No shared-space smoking');
-  await page.locator('#smoking_want').selectOption('No shared-space smoking');
-  await page.locator('#smoking_strength').selectOption('dealbreaker');
+  await page.getByRole('group', { name: 'Sleep rhythm' }).getByRole('button', { name: 'Early nights' }).click();
+  const smoking = page.getByRole('group', { name: 'Smoking' });
+  await smoking.getByRole('button', { name: 'No shared-space smoking' }).click();
+  await smoking.getByLabel('My flatmate must match this').check();
   await expect(page.getByText('2 of 14 answered')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/onboarding\/preferences/);

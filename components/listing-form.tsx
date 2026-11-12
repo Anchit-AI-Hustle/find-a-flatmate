@@ -77,7 +77,7 @@ export function ListingForm({ listing }: { listing?: Listing }) {
       </section>
       <section aria-labelledby="s-rules" style={{ margin: '16px 0' }}>
         <h2 id="s-rules">House rules and habits</h2>
-        <p className="muted">These are matched against each seeker’s answers. Mark a dealbreaker only when the household truly means it.</p>
+        <p className="muted">Tap how this home runs. Seekers are matched against it.</p>
         <LifestyleFields mode="home" initial={answerMap(l?.household_preferences ?? [])} />
       </section>
       {l && l.status !== 'draft' ? <p className="note warn">Saving changes moves this listing back to draft, and it must be reviewed again before it is live.</p> : null}

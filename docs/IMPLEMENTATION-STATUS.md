@@ -15,6 +15,8 @@ The P0 product is built and passes its tests against a real local Supabase stack
 | Intent, basics, lifestyle questionnaire (skip, edit, progress), privacy choices, resume | Built; verified locally | journeys spec; `tests/integration/workflows.test.ts` |
 | Listings: create, edit, photos (metadata stripped), submit, moderate, pause, reconfirm, fill, expiry | Built; verified locally | journeys spec; workflows tests |
 | Discover people and rooms: filters, sort, fit reasons, differences, missing answers, empty states | Built; verified locally | journeys spec |
+| Swipe matching: one card at a time for people and rooms; like, pass, undo, match screen; buttons, arrow keys and drag; list view kept as an option | Built; verified locally | `tests/e2e/swipe.spec.ts` |
+| One-tap lifestyle chips (14 topics, optional “must match”), illustrated avatars, shortened landing page | Built; verified locally | journeys and public specs |
 | Deterministic matching with hard constraints, weights, confidence and explanations | Built | `lib/matching.test.ts`; `docs/MATCHING-SPEC.md` |
 | Mutual interest, chat, unread counts, scam warning, report, block | Built; verified locally | journeys spec; workflows and hardening tests |
 | Saved items, matches list, visits (request, confirm, decline, reschedule, cancel, complete, no-show), address sharing | Built; verified locally | journeys spec; workflows tests |
