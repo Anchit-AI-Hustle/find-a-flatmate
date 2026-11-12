@@ -18,10 +18,11 @@ function friendly(error:{code?:string;message:string}){
   return 'We couldn’t save that. Check your entries and try again.';
 }
 const defaultPath = '/app';
+const fieldMessage=(field:unknown)=>typeof field==='string'?`Check “${field.replaceAll('_',' ')}”: the value is missing or not in the expected format.`:'Check your entries: a value is missing or not in the expected format.';
 export async function selectIntent(raw:string){
   const intent=z.enum(['looking_for_room','have_room','find_together']).safeParse(raw);
-  if(intent.success) (await cookies()).set('ff_intent',intent.data,{httpOnly:true,sameSite:'lax',maxAge:3600,path:'/'});
-  redirect(await session()?'/onboarding/basics':'/login');
+  if(intent.success) (await cookies()).set('ff_intent',intent.data,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:3600,path:'/'});
+  redirect(await session()?(intent.success?'/onboarding/basics?intent='+intent.data:'/onboarding/basics'):'/login');
 }
 export async function login(_:State,f:FormData):Promise<State>{
  const db=await server(), email=forms.email.safeParse(f.get('email'));
@@ -41,7 +42,18 @@ function parse<T extends z.ZodType>(schema:T,f:FormData,nullable:string[]=[],ext
  for(const key of nullable) if(!vals[key]) vals[key]=null;
  return schema.parse({...vals,...extra});
 }
-type Op='basics'|'lifestyle'|'privacy'|'listing'|'listingState'|'interest'|'save'|'block'|'report'|'message'|'visit'|'location'|'request'|'moderate'|'evidence'|'waitlist'|'feedback'|'found'|'upload'|'removePhoto';
+/** Best-effort removal of a closing member's stored listing photos (the files, not only the rows). */
+async function removePhotos(owner:string){
+ const backend=service();
+ if(!backend) return;
+ const bucket=backend.storage.from('room-photos');
+ const {data:folders}=await bucket.list(owner,{limit:100});
+ for(const folder of folders??[]){
+  const {data:files}=await bucket.list(owner+'/'+folder.name,{limit:100});
+  if(files?.length) await bucket.remove(files.map(f=>owner+'/'+folder.name+'/'+f.name));
+ }
+}
+export type Op='basics'|'lifestyle'|'privacy'|'listing'|'listingState'|'interest'|'save'|'block'|'report'|'message'|'visit'|'location'|'request'|'moderate'|'evidence'|'waitlist'|'feedback'|'found'|'upload'|'removePhoto';
 export async function action(op:Op, _:State,f:FormData):Promise<State>{
  const auth=await session();
  if(!auth) return {error:'Sign in again to continue.'};
@@ -55,7 +67,7 @@ export async function action(op:Op, _:State,f:FormData):Promise<State>{
  };
  try{
   switch(op){
-  case 'basics': await rpc('save_basics',{v:parse(forms.basics,f,[],{areas:f.getAll('areas')})}); next=f.get('editing')==='yes'?'/app/profile':'/onboarding/lifestyle';break;
+  case 'basics': await rpc('save_basics',{v:parse(forms.basics,f,[],{areas:f.getAll('areas')})});(await cookies()).delete('ff_intent'); next=f.get('editing')==='yes'?'/app/profile':'/onboarding/lifestyle';break;
   case 'lifestyle': await rpc('save_lifestyle',{answers:readAnswers(f)});next=f.get('editing')==='yes'?'/app/profile':'/onboarding/preferences';break;
   case 'privacy': await rpc('save_privacy',{v:parse(forms.privacy,f,['discoverable','analytics','reminders','status'])});if(f.get('onboarding')==='yes') next='/onboarding/complete';break;
   case 'listing':{
@@ -73,10 +85,10 @@ export async function action(op:Op, _:State,f:FormData):Promise<State>{
   case 'message':await rpc('send_message',parse(forms.message,f));result={success:'Message sent.'};break;
   case 'visit':await rpc('visit_transition',parse(forms.visit,f,['v','at_time']));result={success:'Visit updated.'};break;
   case 'location':await rpc('visit_location',parse(forms.location,f,['location']));break;
-  case 'request':{const {kind,details}=parse(forms.request,f,['details','confirm']);await rpc('data_request',{kind,details});result={success:kind==='delete'?'Account closed. A deletion request is in the privacy queue.':'Your request is in the support queue.'};break;}
+  case 'request':{const {kind,details}=parse(forms.request,f,['details','confirm']);await rpc('data_request',{kind,details});if(kind==='delete') await removePhotos(user.id);result={success:kind==='delete'?'Account closed. A deletion request is in the privacy queue.':'Your request is in the support queue.'};break;}
   case 'moderate':await rpc('moderate',parse(forms.moderate,f));break;
   case 'evidence':{const body=await rpc('review_reported_message',parse(forms.evidence,f));result={success:'Evidence access was recorded.',evidence:z.string().parse(body)};break;}
-  case 'waitlist': await rpc('join_waitlist');result={success:'Your interest in more availability in this city was saved.'};break;
+  case 'waitlist': await rpc('join_waitlist');result={success:'You’re on the waitlist for this city. We don’t send alerts yet.'};break;
   case 'feedback':await rpc('match_feedback',parse(forms.feedback,f));result={success:'Thanks for the feedback.'};break;
   case 'found':await rpc('track_product_event',{event_name:'home_found_self_reported'});result={success:'Outcome recorded if you opted into analytics.'};break;
   case 'upload':{
@@ -114,7 +126,7 @@ export async function action(op:Op, _:State,f:FormData):Promise<State>{
   default:return {error:'Unknown action.'};
   }
  }catch(e){
-   return {error:e instanceof z.ZodError ? (e.issues[0]?.code==='custom'?e.issues[0].message:'Check the highlighted form requirements and try again.') : e instanceof Error?e.message:'Something went wrong. Try again.'};
+   return {error:e instanceof z.ZodError ? (e.issues[0]?.code==='custom'&&e.issues[0].message!=='Invalid input'?e.issues[0].message:fieldMessage(e.issues[0]?.path[0])) : e instanceof Error?e.message:'Something went wrong. Try again.'};
  }
  revalidatePath(defaultPath,'layout');
  revalidatePath('/admin');

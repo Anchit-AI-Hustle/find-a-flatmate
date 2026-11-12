@@ -73,3 +73,18 @@ describe('form helpers', () => {
     expect(readAnswers(fd([]))).toEqual({});
   });
 });
+
+describe('date windows and money edge cases', () => {
+  const valid = { name: 'Asha', city: 'gurugram', areas: ['sector-56'], min: '10000', max: '20000', from: '2026-12-01', until: '2027-01-31', months: '6', intent: 'looking_for_room', adult: 'on', terms: 'on' };
+  it('rejects a move-in window longer than 180 days with a specific message', () => {
+    const r = forms.basics.safeParse({ ...valid, until: '2027-08-01' });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].message).toBe('Keep your move-in window within 180 days');
+  });
+  it('keeps paise exact for awkward decimals', () => {
+    expect(paise.parse('17499.99')).toBe(1_749_999);
+    expect(paise.parse('0.1')).toBe(10);
+    expect(paise.parse('500000')).toBe(50_000_000);
+    expect(paise.safeParse('500000.01').success).toBe(false);
+  });
+});

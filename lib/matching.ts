@@ -38,6 +38,8 @@ function lifestyle(a:Answers,b:Answers,room:boolean) {
       if(expects.want===other.habit || expects.strength==='flexible') fit++;
       else if(expects.strength==='dealbreaker') hard.push(`Dealbreaker: ${titles[key]}`);
     }
+    // A household's own dealbreaker about a flatmate always counts, matching the database rule for showing interest.
+    if(room && bb?.strength==='dealbreaker' && bb.want && aa?.habit && bb.want!==aa.habit) hard.push(`Household dealbreaker: ${titles[key]}`);
     const coverage=explained/comparisons.length;
     known+=coverage;
     points+=weight*fit/comparisons.length;

@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
+    name: verify (${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -25,3 +26,44 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+  full-stack:
+    name: database and browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase (applies every migration)
+        run: supabase start -x studio,imgproxy,logflare,vector,edge-runtime,supavisor,realtime,postgres-meta
+      - name: Point the app at the local stack
+        run: |
+          supabase status -o env > status.env
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(grep '^API_URL=' status.env | cut -d= -f2- | tr -d '"')"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(grep '^PUBLISHABLE_KEY=' status.env | cut -d= -f2- | tr -d '"')"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SECRET_KEY=' status.env | cut -d= -f2- | tr -d '"')"
+            echo "NEXT_PUBLIC_SITE_URL=http://localhost:3000"
+            echo "APP_ENV=test"
+          } > .env.local
+          rm status.env
+      - name: Database access-control and workflow tests
+        run: npm run test:integration
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Browser journeys
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
