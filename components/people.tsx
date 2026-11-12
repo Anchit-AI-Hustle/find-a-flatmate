@@ -3,11 +3,12 @@ import { BadgeCheck, CalendarDays, MapPin, Wallet } from 'lucide-react';
 import { areaName, intents, rupees } from '@/lib/catalog';
 import type { Candidate, Interest } from '@/lib/db';
 import { dateText } from '@/lib/validate';
+import { Doodle } from './doodle';
 import { ActionForm } from './form';
 
 export function Avatar({ name, id }: { name: string; id: string }) {
-  const tone = (id.charCodeAt(0) + id.charCodeAt(id.length - 1)) % 4;
-  return <span className={`avatar c${tone}`} aria-hidden="true">{name.trim().charAt(0).toUpperCase()}</span>;
+  void name;
+  return <Doodle id={id} />;
 }
 export function PersonFacts({ c }: { c: Candidate }) {
   return (

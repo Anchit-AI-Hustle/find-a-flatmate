@@ -29,7 +29,7 @@ test('public pages render at every width with no overflow, console errors or acc
 test('landing page states live inventory honestly and leads into onboarding', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Find someone you can actually live with');
-  await expect(page.getByTestId('inventory')).toContainText(/no rooms are live yet|moderator-reviewed room/);
+  await expect(page.getByTestId('inventory')).toContainText(/no rooms are live yet|reviewed rooms? live now/);
   await expect(page.getByText(/verified safe|100% verified/i)).toHaveCount(0);
   await page.getByRole('button', { name: /I have a room to fill/ }).click();
   await expect(page).toHaveURL(/\/login/);

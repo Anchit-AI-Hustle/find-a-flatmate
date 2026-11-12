@@ -85,7 +85,7 @@ test('passing on a room hides that owner’s rooms and can be undone from the ro
   await page.goto(`/app/rooms/${id}`);
   await page.getByRole('button', { name: 'Not for me' }).click();
   await expect(page.getByText('You passed')).toBeVisible();
-  await page.goto('/app/discover?mode=rooms');
+  await page.goto('/app/discover?mode=rooms&view=list');
   await expect(page.locator('article').filter({ hasText: `Passable room ${t}` })).toHaveCount(0);
   await page.goto(`/app/rooms/${id}`);
   await page.getByRole('button', { name: 'Undo' }).click();

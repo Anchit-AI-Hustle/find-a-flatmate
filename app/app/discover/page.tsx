@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import { SlidersHorizontal } from 'lucide-react';
+import { LayoutList, Layers, SlidersHorizontal } from 'lucide-react';
+import { PersonDeckCard, RoomDeckCard } from '@/components/deck-cards';
+import { SwipeDeck, type DeckItem } from '@/components/swipe-deck';
 import { Fit, Score } from '@/components/fit';
 import { ActionForm } from '@/components/form';
 import { Avatar, InterestActions, PersonFacts, SaveButton, relate } from '@/components/people';
@@ -10,7 +12,7 @@ import { expandedListing, me, person, room, type Candidate, type Interest, type 
 import { matchPeople, matchRoom } from '@/lib/matching';
 
 export const metadata = { title: 'Discover' };
-type Search = { mode?: string; area?: string; max?: string; type?: string; intent?: string; amenity?: string; sort?: string; all?: string };
+type Search = { view?: string; mode?: string; area?: string; max?: string; type?: string; intent?: string; amenity?: string; sort?: string; all?: string };
 const rank = <T extends { result: { score: number | null; hard_fail_reasons: string[] } }>(a: T, b: T) =>
   Number(a.result.hard_fail_reasons.length > 0) - Number(b.result.hard_fail_reasons.length > 0) || (b.result.score ?? -1) - (a.result.score ?? -1);
 
@@ -29,6 +31,8 @@ export default async function Discover({ searchParams }: { searchParams: Promise
   const saved = (savedRows.data ?? []) as { profile_id: string | null; listing_id: string | null }[];
   void db.rpc('track_product_event', { event_name: 'discover_view' }).then(() => {}, () => {});
 
+  const listView = q.view === 'list';
+  const deck: DeckItem[] = [];
   let cards: React.ReactNode[] = [];
   let hidden = 0;
   let total = 0;
@@ -45,6 +49,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     total = list.length;
     if (!q.sort || q.sort === 'fit') list.sort(rank);
     if (!q.all) { hidden = list.filter(x => x.result.hard_fail_reasons.length).length; list = list.filter(x => !x.result.hard_fail_reasons.length); }
+    for (const { l, result } of list) if (!result.hard_fail_reasons.length && !relate(interests, user.id, l.owner_id).mine) deck.push({ key: l.id, target: l.owner_id, listing: l.id, name: l.title, href: `/app/rooms/${l.id}`, card: <RoomDeckCard l={l} result={result} /> });
     cards = list.map(({ l, result }) => <RoomCard key={l.id} listing={l} result={result} relation={relate(interests, user.id, l.owner_id)} saved={saved.some(s => s.listing_id === l.id)} />);
   } else {
     const { data } = await db.rpc('discover_people', { city });
@@ -55,6 +60,12 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     total = list.length;
     if (!q.sort || q.sort === 'fit') list.sort(rank);
     if (!q.all) { hidden = list.filter(x => x.result.hard_fail_reasons.length).length; list = list.filter(x => !x.result.hard_fail_reasons.length); }
+    for (const { c, result } of list) {
+      const relation = relate(interests, user.id, c.id);
+      if (!result.hard_fail_reasons.length && !relation.mine) deck.push({ key: c.id, target: c.id, name: c.display_name, href: `/app/people/${c.id}`, card: <PersonDeckCard c={c} result={result} likesYou={relation.theirs === 'sent'} /> });
+    }
+    // People who already like you come first.
+    deck.sort((a, b) => Number(interests.some(i => i.actor_id === b.target && i.status === 'sent')) - Number(interests.some(i => i.actor_id === a.target && i.status === 'sent')));
     cards = list.map(({ c, result }) => (
       <article key={c.id} className="card result">
         <div className="head">
@@ -73,19 +84,22 @@ export default async function Discover({ searchParams }: { searchParams: Promise
   }
   const shown = cards.length;
   cards = cards.slice(0, 40);
-  const params = (extra: Record<string, string>) => '?' + new URLSearchParams({ ...Object.fromEntries(Object.entries(q).filter(([, v]) => v)), ...extra }).toString();
+  const params = (extra: Record<string, string>) => '?' + new URLSearchParams(Object.fromEntries(Object.entries({ ...q, ...extra }).filter(([, v]) => v)) as Record<string, string>).toString();
   const filtered = Boolean(q.area || q.max || q.type || q.intent || q.amenity);
   return (
     <>
-      <div className="page-title"><h1>Discover</h1><span className="chip plain">{cities[city]?.name}</span></div>
+      <div className="page-title"><h1>Discover</h1>
+        <Link className="btn small" href={params({ view: listView ? '' : 'list' })} aria-label={listView ? 'Switch to swipe cards' : 'Switch to list view'}>{listView ? <><Layers size={16} aria-hidden="true" /> Cards</> : <><LayoutList size={16} aria-hidden="true" /> List</>}</Link>
+      </div>
       {profile.status === 'paused' ? <p className="note warn">Your profile is paused, so Discover is empty and nobody can find you. <Link href="/app/settings/privacy">Resume your profile</Link></p> : null}
       <nav className="segmented" aria-label="What to show">
-        <Link href="/app/discover" aria-current={rooms ? undefined : 'true'}>Find a person</Link>
-        <Link href="/app/discover?mode=rooms" aria-current={rooms ? 'true' : undefined}>Find a room</Link>
+        <Link href={listView ? '/app/discover?view=list' : '/app/discover'} aria-current={rooms ? undefined : 'true'}>People</Link>
+        <Link href={listView ? '/app/discover?mode=rooms&view=list' : '/app/discover?mode=rooms'} aria-current={rooms ? 'true' : undefined}>Rooms</Link>
       </nav>
       <details className="filterbox" open={filtered}>
-        <summary><SlidersHorizontal size={16} aria-hidden="true" />Filter and sort</summary>
+        <summary><SlidersHorizontal size={16} aria-hidden="true" />Filters</summary>
         <form method="get" className="filters">
+          {listView ? <input type="hidden" name="view" value="list" /> : null}
           {rooms ? <input type="hidden" name="mode" value="rooms" /> : null}
           <div className="field"><label htmlFor="f-area">Locality</label>
             <select id="f-area" name="area" defaultValue={q.area ?? ''}><option value="">Any</option>{Object.entries(areas).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></div>
@@ -107,6 +121,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
           <div className="field"><button className="btn small">Apply</button></div>
         </form>
       </details>
+      {listView ? <>
       <p className="small muted" role="status">{shown > cards.length ? `Showing the ${cards.length} best fits of ${shown}. Use the filters to narrow down.` : `${cards.length} shown`}{hidden ? <> · {hidden} hidden because budget, dates, locality or a dealbreaker don’t line up. <Link href={params({ all: '1' })}>Show them anyway</Link></> : null}</p>
       {cards.length ? <div className="grid two" style={{ marginTop: 12 }}>{cards}</div> : (
         <div className="card empty">
@@ -120,7 +135,24 @@ export default async function Discover({ searchParams }: { searchParams: Promise
           </div>
         </div>
       )}
-      {cards.length ? (
+      </> : (
+        <SwipeDeck
+          items={deck.slice(0, 40)}
+          matchArt={<Art name="kitchen" width={960} height={720} />}
+          empty={
+            <div className="card empty">
+              <Art name="together" width={960} height={720} />
+              <h2>{profile.status === 'paused' ? 'You’re paused' : 'You’re all caught up'}</h2>
+              <p className="muted">{hidden ? `${hidden} more don’t match your budget, dates, area or a dealbreaker.` : rooms ? 'New rooms appear here once they’re approved.' : 'New people appear here as they join.'}</p>
+              <div className="row" style={{ justifyContent: 'center' }}>
+                <Link className="btn primary" href={rooms ? '/app/discover' : '/app/discover?mode=rooms'}>{rooms ? 'See people' : 'See rooms'}</Link>
+                <Link className="btn" href="/onboarding/basics">Widen my search</Link>
+              </div>
+            </div>
+          }
+        />
+      )}
+      {listView && cards.length ? (
         <div className="row" style={{ marginTop: 20 }}>
           <span className="small muted">Was this ranking useful?</span>
           <ActionForm op="feedback" submit="Yes" small variant="plain" className="inline-form"><input type="hidden" name="useful" value="yes" /></ActionForm>
