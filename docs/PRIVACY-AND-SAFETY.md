@@ -1,6 +1,7 @@
 # Privacy and Safety
 
-_November 2026 · Describes what the code does today, not what a policy page promises_
+_November 2026 · Describes what the code does today (including `20261112160000_hardening.sql`), not what a
+policy page promises_
 
 **No compliance claim is made anywhere in this document.** Section 8 is an unreviewed checklist. Legal review is
 required before launch.
@@ -42,7 +43,7 @@ logs). Fonts are self-hosted. There is no analytics SDK, advertising tag or thir
 | Audience | Can see |
 |---|---|
 | Anyone, signed out | City and locality names; live room counts per city; for each live listing: id, title, locality, room type, itemised costs, availability dates, review and reconfirmation dates |
-| Signed-in member with an **active** profile | Live listings in full (description, rules, amenities, photos, owner id); discoverable people: name, city, localities, budget range, dates, stay, intent, lifestyle answers, "email verified" |
+| Signed-in member with an **active** profile | Live listings in full (description, rules, amenities, photos, owner id); discoverable people **in the member's own city**: name, city, localities, budget range, dates, stay, intent, lifestyle answers, "email verified". A discoverable person in another city can be opened only by id |
 | A person you sent interest to | Your profile, even if you are not discoverable |
 | Your match | Chat, visit requests, and the visit address within its time window |
 | Moderators | All listings in any state and their photos; all reports; data requests; analytics events with user ids; 60 recently updated profiles (id, name, status, created date); a reported message, one at a time, with a logged justification |
@@ -52,8 +53,8 @@ Controls the member has (`save_privacy`): `discoverable` on or off, profile `act
 reminder opt-in. Pausing hides the profile and listings and makes existing chats unreadable for both sides until
 the profile is active again.
 
-Known limitation: turning `discoverable` off does not currently stop interest from someone who already has your
-profile id (THREAT-MODEL gap G1).
+With `discoverable` off, nobody can send you interest unless you sent them interest first or you own a live
+listing they are responding to. People you have matched with can still open your profile.
 
 ## 3. Consent
 
@@ -76,12 +77,13 @@ There is **no scheduled deletion of any data**. The table states what the code d
 
 | Event | What the code does | Not implemented |
 |---|---|---|
-| Member closes account (`data_request('delete')`) | Queues a pending `delete` request. Sets the profile to `closed` and not discoverable. Sets every open listing to `removed`. Deletes visit addresses the member shared. Deletes the member's analytics events. Sets analytics consent to not granted. The account can no longer write anything except further data requests. Chats become unreadable for the other person | Erasure of the profile row, display name, lifestyle answers, messages, interests, matches, saved items, reports, listing rows, photo records and photo files, and the Supabase Auth user (email). All of these remain. Delete requests cannot be marked fulfilled in the app |
-| Member asks for an export | Queues a pending `export` request (one at a time) | Producing or delivering the export |
+| Member closes account (op `request` with `delete`) | In the database (`data_request('delete')`): queues a pending `delete` request; sets the profile to `closed` and not discoverable; sets every open listing to `removed`; deletes visit addresses the member shared; deletes the member's analytics events; sets analytics consent to not granted. Then the server action deletes the member's stored photo files, best effort, if the service key is configured. The account can no longer write anything except further data requests. Chats become unreadable for the other person | Erasure of the profile row, display name, lifestyle answers, messages, interests, matches, saved items, reports, listing rows, photo records, and the Supabase Auth user (email). All of these remain until an operator completes the deletion request by hand; there is no tooling or written procedure for that, and the request cannot be marked done in the app. Photo files are not deleted if the RPC is called directly |
+| Member downloads their data (`GET /app/settings/data/export`) | Returns a JSON file at once: account email, profile, answers, consents, own listings, interests sent, saved items, visits the member requested, messages the member sent, blocks, reports filed, data requests, waitlist. Available to suspended and closed accounts | Messages received, visits proposed by the other person, analytics events and ranking feedback are not included. If the server cannot read sent messages the list is empty without warning (THREAT-MODEL G27) |
+| Member asks the team for an export | Queues a pending `export` request (one at a time); a moderator can mark it handled | Producing or delivering that export |
 | Analytics consent withdrawn | No new events | Deleting earlier events |
 | Visit leaves `confirmed` (completed, no-show, cancelled, rescheduled) | Address deleted | Deleting the address of a confirmed visit that nobody closes out. It becomes unreadable 2 hours after the start but stays stored |
-| Block | Saved items between the two deleted; chat hidden from both | Deleting messages; cancelling an open visit |
-| Listing filled or removed | Hidden from others | Deleting photos from storage |
+| Block | Saved items between the two deleted; chat hidden from both; any open visit between them cancelled and its address deleted | Deleting messages; unblocking |
+| Listing filled or removed | Hidden from others | Deleting photos from storage (only account closure does that) |
 | Photo removed from a draft | Row and file deleted | — |
 | Messages, reports, audit logs, rate-limit counters ageing | Nothing | Any retention period or purge job |
 | Supabase Auth user deleted by an operator | Database cascades remove the profile and most dependent rows; reports and moderation logs keep rows with the reference nulled | Removing the member's photo files from storage |
@@ -90,8 +92,8 @@ There is **no scheduled deletion of any data**. The table states what the code d
 
 Moderators have no general access to chats. Row level security on `messages` admits conversation members only.
 
-1. A member reports a specific message (`file_report` with `message`). The reporter must still be able to see the
-   conversation at that moment.
+1. A member reports a specific message (`file_report` with `message`). It can be any message from the other person
+   in a conversation the reporter belongs to, including after a block, pause or suspension has hidden the chat.
 2. A moderator moves the report to `investigating` (`moderate('report', …)`), with a reason.
 3. The moderator requests the evidence with a written justification of 10–500 characters
    (`review_reported_message`).
@@ -120,18 +122,19 @@ None of these is a safety guarantee. The site footer says so, and says the produ
 |---|---|
 | Mutual opt-in | No chat until both people send interest |
 | Public-text filter (`private.public_text`) | Rejects names and listing text containing `http://`, `https://`, `www.`, an email address, ten or more digits in a row (with separators), or `<…>` markup. It can also reject two full dates written next to each other |
-| Scam keyword warning | A message is flagged `suspicious` if it contains: `upi`, `paytm`, `phonepe`, `gpay`, `aadhaar`, `aadhar`, `otp`, `whatsapp`, `bank details`, "advance … pay/transfer/deposit", or "token … fee/money/amount". The message is still delivered. Both members can see the flag. Nothing is sent to moderators |
-| Limits of the warning | Matching is by substring, so ordinary words trigger it ("occupied" contains `upi`). Spaced or misspelt terms evade it. Text inside photos is not scanned |
+| Scam keyword warning | A message is flagged `suspicious` if it contains, as whole words: `upi`, `paytm`, `phonepe`, `gpay`, `aadhaar`, `aadhar`, `otp`, `whatsapp`; or the phrases `bank details`, "advance … pay/transfer/deposit", or "token … fee/money/amount". The message is still delivered. Both members can see the flag. Nothing is sent to moderators |
+| Limits of the warning | Ordinary words that merely contain a keyword ("occupied") are no longer flagged. Spaced or misspelt terms evade it. Text inside photos is not scanned. Moderators cannot see flags |
 | Repeated messages | A third identical message in the same chat within an hour is refused |
 | Visit address | Stored apart from the chat; readable only for a confirmed visit, from 24 hours before to 2 hours after |
-| Block | Immediate and permanent; hides the chat for both |
-| Report | Categories: scam, harassment, underage, stale, privacy, appeal, other. Can block in the same step |
+| Block | Immediate and permanent; hides the chat for both and cancels any open visit |
+| Report | Categories offered: scam, harassment, underage, stale, privacy, other. Can block in the same step. Messages and matched people stay reportable after contact is cut |
+| Appeal | A suspended member appeals through the support request on `/app/settings/data` |
 | Listing review | No listing is visible to others before a moderator approves it; edits return it to review |
 | Rate limits | Per account, listed in API-CONTRACTS.md |
 
-Known safety gaps are listed in THREAT-MODEL.md. Two matter most for members: a report cannot be filed once the
-other person has paused, been suspended, closed their account or been blocked; and a suspended member cannot use
-the report form to appeal (the support request works).
+Open safety gaps are listed in THREAT-MODEL.md section 5. The ones members are most likely to meet: there is no
+unblock; a listing cannot be reported once its owner has paused or blocked the reporter; and moderators get no
+signal from flagged messages unless someone reports them.
 
 ## 8. DPDP Act 2023 and DPDP Rules 2025 — UNREVIEWED checklist
 
@@ -145,9 +148,9 @@ commencement; confirm which provisions apply on which dates from the official ga
 | Consent and withdrawal | Analytics is opt-in and can be switched off in settings | Is withdrawal as easy as giving consent for every purpose? What is the lawful basis for ranking feedback and waitlist data? |
 | Purpose limitation | Fields are tied to matching, listing and safety | Is each field necessary? Are lifestyle answers treated appropriately? |
 | Access and correction | Members can view and edit their profile, answers and listings | Is a summary of processing and of recipients required on request? |
-| Erasure | Account closure hides data; erasure is not implemented | What must be erased, by when, and what may be kept (reports, audit logs)? |
-| Export | Request is queued only | Is any export obligation engaged? |
-| Grievance redressal | Support request queue | Published contact, named officer and response time? |
+| Erasure | Account closure hides data and deletes photo files; row and account erasure is a manual operator task with no tooling | What must be erased, by when, and what may be kept (reports, audit logs)? |
+| Export | Self-serve JSON download of the member's own data, with the exclusions listed in section 4 | Is any export obligation engaged, and is the content sufficient? |
+| Grievance redressal | Support request queue; moderators can mark requests handled | Published contact, named officer and response time? |
 | Nomination | Not implemented | Is it required for this product? |
 | Children | 18+ self-declaration; `underage` report category | Is self-declaration enough? What if a minor is found? |
 | Security safeguards | RLS, RPC-only writes, private storage, logged moderator access | Are the gaps in THREAT-MODEL.md acceptable? Encryption, access logs and log retention requirements? |
