@@ -1,127 +1,473 @@
 import { cache } from 'react';
 import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { Pool } from '@neondatabase/serverless';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { authReady, supabaseKey, supabaseUrl } from './env';
+import { createHmac } from 'node:crypto';
+import { authReady, neonAuthUrl, neonDbUrl, supabaseKey, supabaseUrl, useNeon } from './env';
 import type { Answers, Person, Room } from './matching';
 import type { Costs } from './catalog';
 
+const SESSION_COOKIE = 'ff_neon_session';
+let _pool: Pool | null = null;
+function getPool() {
+  if (!_pool) _pool = new Pool({ connectionString: neonDbUrl! });
+  return _pool;
+}
+
+function signSession(payload: { id: string; email: string; name?: string }) {
+  const secret = process.env.CRON_SECRET || process.env.NEON_PROJECT_ID || 'find-a-flatmate-edge-secret';
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = createHmac('sha256', secret).update(data).digest('base64url');
+  return `${data}.${sig}`;
+}
+
+function verifySessionToken(token?: string | null): { id: string; email: string; name?: string } | null {
+  if (!token || !token.includes('.')) return null;
+  const [data, sig] = token.split('.');
+  const secret = process.env.CRON_SECRET || process.env.NEON_PROJECT_ID || 'find-a-flatmate-edge-secret';
+  const expected = createHmac('sha256', secret).update(data).digest('base64url');
+  if (sig !== expected) return null;
+  try {
+    return JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+export async function ensureNeonAuthUser(user: { id: string; email: string; name?: string }) {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO ff_auth.users (id, email, email_confirmed_at, raw_user_meta_data)
+     VALUES ($1::uuid, $2, now(), $3::jsonb)
+     ON CONFLICT (id) DO UPDATE
+     SET email = EXCLUDED.email,
+         email_confirmed_at = COALESCE(ff_auth.users.email_confirmed_at, now())`,
+    [user.id, user.email.toLowerCase(), JSON.stringify({ name: user.name || '' })]
+  );
+}
+
+export async function setNeonSessionCookie(user: { id: string; email: string; name?: string }) {
+  await ensureNeonAuthUser(user);
+  const jar = await cookies();
+  jar.set(SESSION_COOKIE, signSession(user), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 60 * 60 * 24 * 30,
+    path: '/',
+  });
+}
+
+async function resolveNeonAuthFromCookies(): Promise<{ id: string; email: string; name?: string } | null> {
+  const jar = await cookies();
+  const local = verifySessionToken(jar.get(SESSION_COOKIE)?.value);
+  if (local) return local;
+
+  if (neonAuthUrl) {
+    const cookieHeader = jar.getAll().map((c) => `${c.name}=${c.value}`).join('; ');
+    if (cookieHeader) {
+      try {
+        const res = await fetch(`${neonAuthUrl}/get-session`, {
+          headers: { cookie: cookieHeader },
+          cache: 'no-store',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.user?.id && data?.user?.email) {
+            const u = { id: String(data.user.id), email: String(data.user.email), name: data.user.name };
+            await ensureNeonAuthUser(u);
+            return u;
+          }
+        }
+      } catch {
+        // Ignore network errors
+      }
+    }
+  }
+  return null;
+}
+
+class NeonQueryBuilder<T = any> implements PromiseLike<{ data: T; error: any; count?: number | null }> {
+  private _table: string;
+  private _selectCols = '*';
+  private _countExact = false;
+  private _headOnly = false;
+  private _filters: { col: string; op: string; val: any }[] = [];
+  private _orderBy: { col: string; asc: boolean }[] = [];
+  private _limitVal: number | null = null;
+  private _single = false;
+  private _userId: string | null;
+  private _role: 'authenticated' | 'anon' | 'service';
+
+  constructor(table: string, userId: string | null, role: 'authenticated' | 'anon' | 'service') {
+    this._table = table;
+    this._userId = userId;
+    this._role = role;
+  }
+
+  select(cols = '*', opts?: { count?: 'exact'; head?: boolean }) {
+    this._selectCols = cols;
+    if (opts?.count === 'exact') this._countExact = true;
+    if (opts?.head) this._headOnly = true;
+    return this;
+  }
+  eq(col: string, val: any) { this._filters.push({ col, op: '=', val }); return this; }
+  neq(col: string, val: any) { this._filters.push({ col, op: '<>', val }); return this; }
+  gt(col: string, val: any) { this._filters.push({ col, op: '>', val }); return this; }
+  gte(col: string, val: any) { this._filters.push({ col, op: '>=', val }); return this; }
+  in(col: string, vals: any[]) { this._filters.push({ col, op: 'IN', val: vals }); return this; }
+  not(col: string, op: string, val: string) { this._filters.push({ col, op: `NOT_${op.toUpperCase()}`, val }); return this; }
+  order(col: string, opts?: { ascending?: boolean }) { this._orderBy.push({ col, asc: opts?.ascending !== false }); return this; }
+  limit(n: number) { this._limitVal = n; return this; }
+  maybeSingle<U = any>() { this._single = true; this._limitVal = 1; return this as unknown as NeonQueryBuilder<U | null>; }
+  overrideTypes<U>() { return this as unknown as NeonQueryBuilder<U>; }
+
+  private async exec(): Promise<{ data: any; error: any; count?: number | null }> {
+    const client = await getPool().connect();
+    try {
+      await client.query('BEGIN');
+      if (this._role !== 'service') {
+        await client.query(`SET LOCAL ROLE ${this._role}`);
+      }
+      if (this._userId) {
+        await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [this._userId]);
+      }
+
+      const params: any[] = [];
+      const whereParts: string[] = [];
+      const safeIdent = (s: string) => {
+        if (!/^[a-zA-Z0-9_]+$/.test(s)) throw new Error(`Invalid identifier: ${s}`);
+        return `"${s}"`;
+      };
+
+      for (const f of this._filters) {
+        const col = safeIdent(f.col);
+        if (f.op === 'IN') {
+          if (!Array.isArray(f.val) || f.val.length === 0) {
+            whereParts.push('FALSE');
+          } else {
+            params.push(f.val);
+            whereParts.push(`${col} = ANY($${params.length})`);
+          }
+        } else if (f.op === 'NOT_IN') {
+          const inner = String(f.val).replace(/^\(|\)$/g, '').split(',').map((s) => s.trim()).filter(Boolean);
+          params.push(inner);
+          whereParts.push(`NOT (${col} = ANY($${params.length}))`);
+        } else {
+          params.push(f.val);
+          whereParts.push(`${col} ${f.op} $${params.length}`);
+        }
+      }
+
+      const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+      const table = safeIdent(this._table);
+
+      if (this._headOnly && this._countExact) {
+        const cRes = await client.query(`SELECT count(*)::int AS c FROM public.${table} ${whereSql}`, params);
+        await client.query('COMMIT');
+        return { data: null, count: cRes.rows[0]?.c ?? 0, error: null };
+      }
+
+      let selectExpr = '*';
+      const hasRelations = this._selectCols.includes('listing_images(') || this._selectCols.includes('listing_amenities(') || this._selectCols.includes('household_preferences(');
+      if (hasRelations && this._table === 'listings') {
+        selectExpr = `*,
+          COALESCE((SELECT json_agg(json_build_object('id', li.id, 'created_at', li.created_at)) FROM public.listing_images li WHERE li.listing_id = listings.id), '[]'::json) AS listing_images,
+          COALESCE((SELECT json_agg(json_build_object('amenity', la.amenity)) FROM public.listing_amenities la WHERE la.listing_id = listings.id), '[]'::json) AS listing_amenities,
+          COALESCE((SELECT json_agg(json_build_object('dimension', hp.dimension, 'habit', hp.habit, 'expectation', hp.expectation, 'strength', hp.strength)) FROM public.household_preferences hp WHERE hp.listing_id = listings.id), '[]'::json) AS household_preferences`;
+      } else if (this._selectCols !== '*') {
+        const cols = this._selectCols.split(',').map((c) => c.trim()).filter((c) => /^[a-zA-Z0-9_]+$/.test(c)).map(safeIdent);
+        if (cols.length) selectExpr = cols.join(', ');
+      }
+
+      const orderSql = this._orderBy.length
+        ? `ORDER BY ${this._orderBy.map((o) => `${safeIdent(o.col)} ${o.asc ? 'ASC' : 'DESC'}`).join(', ')}`
+        : '';
+      const limitSql = this._limitVal !== null ? `LIMIT ${Number(this._limitVal)}` : '';
+
+      const res = await client.query(`SELECT ${selectExpr} FROM public.${table} ${whereSql} ${orderSql} ${limitSql}`, params);
+      await client.query('COMMIT');
+
+      if (this._single) {
+        return { data: res.rows[0] ?? null, error: null };
+      }
+      return { data: res.rows, count: this._countExact ? res.rows.length : undefined, error: null };
+    } catch (e: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      return { data: null, error: { code: e.code, message: e.message } };
+    } finally {
+      client.release();
+    }
+  }
+
+  then<TResult1 = { data: T; error: any; count?: number | null }, TResult2 = never>(
+    onfulfilled?: ((value: { data: T; error: any; count?: number | null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+  ): Promise<TResult1 | TResult2> {
+    return this.exec().then(onfulfilled as any, onrejected);
+  }
+}
+
+function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon' | 'service') {
+  return {
+    from(table: string) {
+      return new NeonQueryBuilder(table, userId, role);
+    },
+    rpc(name: string, args: Record<string, any> = {}) {
+      const execRpc = async () => {
+        if (!/^[a-zA-Z0-9_]+$/.test(name)) return { data: null, error: { message: 'Invalid RPC' } };
+        const client = await getPool().connect();
+        try {
+          await client.query('BEGIN');
+          if (role !== 'service') await client.query(`SET LOCAL ROLE ${role}`);
+          if (userId) await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [userId]);
+
+          const keys = Object.keys(args).filter((k) => args[k] !== undefined);
+          const params = keys.map((k) => args[k]);
+          const argList = keys.map((k, i) => `${k} => $${i + 1}`).join(', ');
+          const meta = await client.query(
+            `SELECT proretset FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 LIMIT 1`,
+            [name]
+          );
+          const isSet = meta.rows[0]?.proretset === true;
+          const sql = isSet ? `SELECT * FROM public.${name}(${argList})` : `SELECT public.${name}(${argList}) AS res`;
+          const res = await client.query(sql, params);
+          await client.query('COMMIT');
+          return { data: isSet ? res.rows : (res.rows[0]?.res ?? null), error: null };
+        } catch (e: any) {
+          await client.query('ROLLBACK').catch(() => {});
+          return { data: null, error: { code: e.code, message: e.message } };
+        } finally {
+          client.release();
+        }
+      };
+      const p = execRpc() as Promise<{ data: any; error: any }> & { overrideTypes: <U>() => Promise<{ data: U; error: any }> };
+      p.overrideTypes = () => p as any;
+      return p;
+    },
+    storage: {
+      from(bucketId: string) {
+        return {
+          async upload(path: string, fileBody: Buffer | Uint8Array | ArrayBuffer, opts?: { contentType?: string }) {
+            try {
+              const buf = Buffer.isBuffer(fileBody) ? fileBody : Buffer.from(fileBody as any);
+              await getPool().query(
+                `INSERT INTO ff_storage.objects (bucket_id, name, data, mime_type)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (bucket_id, name) DO UPDATE SET data = EXCLUDED.data, mime_type = EXCLUDED.mime_type`,
+                [bucketId, path, buf, opts?.contentType || 'image/webp']
+              );
+              return { data: { path }, error: null };
+            } catch (e: any) {
+              return { data: null, error: { message: e.message } };
+            }
+          },
+          async download(path: string) {
+            try {
+              const res = await getPool().query(
+                `SELECT data, mime_type FROM ff_storage.objects WHERE bucket_id = $1 AND name = $2 LIMIT 1`,
+                [bucketId, path]
+              );
+              const row = res.rows[0];
+              if (!row?.data) return { data: null, error: { message: 'Not found' } };
+              return { data: new Blob([row.data], { type: row.mime_type || 'image/webp' }), error: null };
+            } catch (e: any) {
+              return { data: null, error: { message: e.message } };
+            }
+          },
+          async list(prefix: string) {
+            try {
+              const res = await getPool().query(
+                `SELECT name FROM ff_storage.objects WHERE bucket_id = $1 AND name LIKE $2`,
+                [bucketId, `${prefix}%`]
+              );
+              const seen = new Set<string>();
+              for (const r of res.rows) {
+                const rel = String(r.name).slice(prefix.replace(/^\//, '').length).replace(/^\//, '');
+                const seg = rel.split('/')[0];
+                if (seg) seen.add(seg);
+              }
+              return { data: Array.from(seen).map((name) => ({ name })), error: null };
+            } catch (e: any) {
+              return { data: [], error: { message: e.message } };
+            }
+          },
+          async remove(paths: string[]) {
+            if (!paths.length) return { data: [], error: null };
+            await getPool().query(`DELETE FROM ff_storage.objects WHERE bucket_id = $1 AND name = ANY($2::text[])`, [bucketId, paths]);
+            return { data: paths, error: null };
+          },
+        };
+      },
+    },
+    auth: {
+      async getUser() {
+        const u = await resolveNeonAuthFromCookies();
+        if (!u) return { data: { user: null }, error: null };
+        return {
+          data: {
+            user: {
+              id: u.id,
+              email: u.email,
+              email_confirmed_at: new Date().toISOString(),
+              user_metadata: { name: u.name || '' },
+            },
+          },
+          error: null,
+        };
+      },
+      async signOut() {
+        const jar = await cookies();
+        jar.delete(SESSION_COOKIE);
+        return { error: null };
+      },
+    },
+  };
+}
+
 export const server = cache(async () => {
   if (!authReady) return null;
+  if (useNeon) {
+    const u = await resolveNeonAuthFromCookies();
+    return createNeonDbClient(u?.id ?? null, u ? 'authenticated' : 'anon') as unknown as SupabaseClient;
+  }
   const jar = await cookies();
-  return createServerClient(supabaseUrl!,supabaseKey!, { cookies: {
-    getAll:()=>jar.getAll(),
-    setAll(items){try{for(const {name,value,options} of items) jar.set(name,value,options)}catch{/* Proxy handles refresh during render. */}},
-  }});
+  return createServerClient(supabaseUrl!, supabaseKey!, {
+    cookies: {
+      getAll: () => jar.getAll(),
+      setAll(items) {
+        try {
+          for (const { name, value, options } of items) jar.set(name, value, options);
+        } catch {
+          /* Proxy handles refresh during render. */
+        }
+      },
+    },
+  });
 });
+
 export const service = () => {
+  if (useNeon) return createNeonDbClient(null, 'service') as unknown as SupabaseClient;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  return supabaseUrl && key ? createClient(supabaseUrl,key,{auth:{persistSession:false,autoRefreshToken:false}}) : null;
+  return supabaseUrl && key ? createClient(supabaseUrl, key, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
 };
+
 export const session = cache(async () => {
   const db = await server();
-  if(!db) return null;
-  const {data:{user}} = await db.auth.getUser();
-  return user?.email_confirmed_at ? {user,db} : null;
+  if (!db) return null;
+  const { data: { user } } = await db.auth.getUser();
+  return user?.email_confirmed_at ? { user, db: db as SupabaseClient } : null;
 });
+
 export type Profile = {
- id:string; display_name:string; city_id:string; localities:string[]; budget_min:number; budget_max:number;
- move_from:string; move_until:string; stay_months:number; intent:string; status:string; discoverable:boolean;
+  id: string; display_name: string; city_id: string; localities: string[]; budget_min: number; budget_max: number;
+  move_from: string; move_until: string; stay_months: number; intent: string; status: string; discoverable: boolean;
 };
-export type Candidate = Omit<Profile,'status'|'discoverable'> & {email_verified:boolean; answers:Answers};
+export type Candidate = Omit<Profile, 'status' | 'discoverable'> & { email_verified: boolean; answers: Answers };
 export type PublicRoom = Costs & {
- id:string; title:string; city_id:string; locality_id:string; room_type:string;
- available_from:string; available_until:string; reviewed_at:string|null; confirmed_at:string|null;
+  id: string; title: string; city_id: string; locality_id: string; room_type: string;
+  available_from: string; available_until: string; reviewed_at: string | null; confirmed_at: string | null;
 };
 export type Listing = PublicRoom & {
- owner_id:string; description:string; building:string; furnishing:string; bath_sharing:string; rooms:number; bathrooms:number;
- occupants:number; capacity:number; poster_type:string; transport:string; restrictions:string; min_months:number;
- status:string; expires_at:string|null; monthly:number; created_at:string;
- listing_amenities?:{amenity:string}[];
- listing_images?:{id:string}[];
- household_preferences?:AnswerRow[];
+  owner_id: string; description: string; building: string; furnishing: string; bath_sharing: string; rooms: number; bathrooms: number;
+  occupants: number; capacity: number; poster_type: string; transport: string; restrictions: string; min_months: number;
+  status: string; expires_at: string | null; monthly: number; created_at: string;
+  listing_amenities?: { amenity: string }[];
+  listing_images?: { id: string }[];
+  household_preferences?: AnswerRow[];
 };
-export type AnswerRow = {dimension:string; habit:string|null; expectation:string|null; strength:'flexible'|'preference'|'dealbreaker'};
-export type Thread = {id:string; other_id:string; display_name:string; unread:number; activity:string};
-export type Message = {id:string; sender_id:string; body:string; suspicious:boolean; created_at:string};
-export type Visit = {id:string; conversation_id:string; proposer_id:string; requester_id:string; starts_at:string; status:string};
-export type Interest = {actor_id:string; target_id:string; status:string};
+export type AnswerRow = { dimension: string; habit: string | null; expectation: string | null; strength: 'flexible' | 'preference' | 'dealbreaker' };
+export type Thread = { id: string; other_id: string; display_name: string; unread: number; activity: string };
+export type Message = { id: string; sender_id: string; body: string; suspicious: boolean; created_at: string };
+export type Visit = { id: string; conversation_id: string; proposer_id: string; requester_id: string; starts_at: string; status: string };
+export type Interest = { actor_id: string; target_id: string; status: string };
+
 export const profile = cache(async () => {
   const s = await session();
   if (!s) return null;
-  const {data,error} = await s.db.from('profiles').select('*').eq('id',s.user.id).maybeSingle<Profile>();
-  if(error) throw new Error('Unable to load your profile');
+  const { data, error } = await s.db.from('profiles').select('*').eq('id', s.user.id).maybeSingle<Profile>();
+  if (error) throw new Error('Unable to load your profile');
   return data;
 });
+
 export async function requireSession() {
   const s = await session();
-  if(!s) redirect('/login');
+  if (!s) redirect('/login');
   return s;
 }
+
 export async function requireProfile() {
-  const s=await requireSession();
-  const p=await profile();
-  if(!p) redirect(/^(looking_for_room|have_room|find_together)$/.test((await cookies()).get('ff_intent')?.value??'')?'/onboarding/basics':'/onboarding/intent');
-  if(p.status==='draft') {
-    // Resume onboarding where the member left off.
-    const {data}=await s.db.from('onboarding_progress').select('step').eq('user_id',s.user.id).maybeSingle<{step:string}>();
-    redirect(data?.step==='preferences'?'/onboarding/preferences':'/onboarding/lifestyle');
+  const s = await requireSession();
+  const p = await profile();
+  if (!p) redirect(/^(looking_for_room|have_room|find_together)$/.test((await cookies()).get('ff_intent')?.value ?? '') ? '/onboarding/basics' : '/onboarding/intent');
+  if (p.status === 'draft') {
+    const { data } = await s.db.from('onboarding_progress').select('step').eq('user_id', s.user.id).maybeSingle<{ step: string }>();
+    redirect(data?.step === 'preferences' ? '/onboarding/preferences' : '/onboarding/lifestyle');
   }
-  if(p.status==='suspended'||p.status==='closed') redirect('/app/settings/data');
-  return {...s,profile:p};
-}
-export async function requireModerator(){
-  const s=await requireSession();
-  const {data}=await s.db.rpc('is_moderator');
-  return data===true ? s : null;
-}
-export function person(row:Profile|Candidate, answers:Answers):Person{
-  return {id:row.id,city:row.city_id,areas:row.localities,budgetMin:row.budget_min,budgetMax:row.budget_max,from:row.move_from,until:row.move_until,months:row.stay_months,answers};
-}
-export function answerMap(rows:AnswerRow[]):Answers {
-  return Object.fromEntries(rows.map(r=>[r.dimension,{habit:r.habit??undefined,want:r.expectation??undefined,strength:r.strength}]));
-}
-export const expandedListing='*,listing_images(id),listing_amenities(amenity),household_preferences(dimension,habit,expectation,strength)';
-export async function rooms(city:string,locality?:string,id?:string) {
-  const db=await server();
-  if(!db) return null;
-  const {data,error}=await db.rpc('public_rooms',{city,locality,room_id:id}).overrideTypes<PublicRoom[],{merge:false}>();
-  return error?null:data;
+  if (p.status === 'suspended' || p.status === 'closed') redirect('/app/settings/data');
+  return { ...s, profile: p };
 }
 
-/** Cookie-less anonymous client so public pages stay cacheable; it can only call anon-granted RPCs. */
-export const publicDb = () => authReady ? createClient(supabaseUrl!,supabaseKey!,{auth:{persistSession:false,autoRefreshToken:false}}) : null;
-/** Honest live room counts per city; null when the database is not configured or unreachable. */
-export async function inventory():Promise<Record<string,number>|null> {
-  const db=publicDb();
-  if(!db) return null;
-  const {data,error}=await db.rpc('public_inventory');
-  if(error||!Array.isArray(data)) return null;
-  return Object.fromEntries((data as {city_id:string;live_rooms:number}[]).map(r=>[r.city_id,Number(r.live_rooms)]));
+export async function requireModerator() {
+  const s = await requireSession();
+  const { data } = await s.db.rpc('is_moderator');
+  return data === true ? s : null;
 }
-export async function publicRooms(city?:string,locality?:string,id?:string):Promise<PublicRoom[]|null> {
-  const db=publicDb();
-  if(!db) return null;
-  const {data,error}=await db.rpc('public_rooms',{city,locality,room_id:id});
-  return error?null:(data??[]) as PublicRoom[];
+
+export function person(row: Profile | Candidate, answers: Answers): Person {
+  return { id: row.id, city: row.city_id, areas: row.localities, budgetMin: row.budget_min, budgetMax: row.budget_max, from: row.move_from, until: row.move_until, months: row.stay_months, answers };
 }
-/** The signed-in, onboarded member with their own answers shaped for matching. */
+export function answerMap(rows: AnswerRow[]): Answers {
+  return Object.fromEntries(rows.map((r) => [r.dimension, { habit: r.habit ?? undefined, want: r.expectation ?? undefined, strength: r.strength }]));
+}
+export const expandedListing = '*,listing_images(id),listing_amenities(amenity),household_preferences(dimension,habit,expectation,strength)';
+
+export async function rooms(city: string, locality?: string, id?: string) {
+  const db = await server();
+  if (!db) return null;
+  const { data, error } = await db.rpc('public_rooms', { city, locality, room_id: id }).overrideTypes<PublicRoom[], { merge: false }>();
+  return error ? null : data;
+}
+
+export const publicDb = () => {
+  if (useNeon) return createNeonDbClient(null, 'anon') as unknown as SupabaseClient;
+  return supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
+};
+
+export async function inventory(): Promise<Record<string, number> | null> {
+  const db = publicDb();
+  if (!db) return null;
+  const { data, error } = await db.rpc('public_inventory');
+  if (error || !Array.isArray(data)) return null;
+  return Object.fromEntries((data as { city_id: string; live_rooms: number }[]).map((r) => [r.city_id, Number(r.live_rooms)]));
+}
+
+export async function publicRooms(city?: string, locality?: string, id?: string): Promise<PublicRoom[] | null> {
+  const db = publicDb();
+  if (!db) return null;
+  const { data, error } = await db.rpc('public_rooms', { city, locality, room_id: id });
+  return error ? null : ((data ?? []) as PublicRoom[]);
+}
+
 export async function me() {
-  const s=await requireProfile();
-  const {data}=await s.db.rpc('own_answers');
-  const answers=(data??{}) as Answers;
-  return {...s,answers,person:person(s.profile,answers)};
-}
-export function room(l:Listing):Room {
-  return {ownerId:l.owner_id,city:l.city_id,areas:[l.locality_id],from:l.available_from,until:l.available_until,months:l.min_months,
-    costs:{rent:l.rent,maintenance:l.maintenance,utilities:l.utilities,recurring:l.recurring,deposit:l.deposit,brokerage:l.brokerage,fees:l.fees},rules:answerMap(l.household_preferences??[])};
+  const s = await requireProfile();
+  const { data } = await s.db.rpc('own_answers');
+  const answers = (data ?? {}) as Answers;
+  return { ...s, answers, person: person(s.profile, answers) };
 }
 
-/** Interest requests waiting for this member's answer; ones they already passed on do not count. */
-export async function pendingRequests(s:NonNullable<Awaited<ReturnType<typeof session>>>):Promise<Interest[]> {
-  const {data}=await s.db.from('interests').select('actor_id,target_id,status').order('updated_at',{ascending:false}).limit(200);
-  const rows=(data??[]) as Interest[];
-  const declined=new Set(rows.filter(r=>r.actor_id===s.user.id&&r.status==='passed').map(r=>r.target_id));
-  return rows.filter(r=>r.target_id===s.user.id&&r.status==='sent'&&!declined.has(r.actor_id));
+export function room(l: Listing): Room {
+  return {
+    ownerId: l.owner_id, city: l.city_id, areas: [l.locality_id], from: l.available_from, until: l.available_until, months: l.min_months,
+    costs: { rent: l.rent, maintenance: l.maintenance, utilities: l.utilities, recurring: l.recurring, deposit: l.deposit, brokerage: l.brokerage, fees: l.fees }, rules: answerMap(l.household_preferences ?? []),
+  };
+}
+
+export async function pendingRequests(s: NonNullable<Awaited<ReturnType<typeof session>>>): Promise<Interest[]> {
+  const { data } = await s.db.from('interests').select('actor_id,target_id,status').order('updated_at', { ascending: false }).limit(200);
+  const rows = (data ?? []) as Interest[];
+  const declined = new Set(rows.filter((r) => r.actor_id === s.user.id && r.status === 'passed').map((r) => r.target_id));
+  return rows.filter((r) => r.target_id === s.user.id && r.status === 'sent' && !declined.has(r.actor_id));
 }

@@ -1,8 +1,8 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { authReady,siteUrl } from './env';
-import { server,session,service } from './db';
+import { authReady,neonAuthUrl,siteUrl,useNeon } from './env';
+import { server,session,service,setNeonSessionCookie } from './db';
 import { forms,formFields,readAnswers,uuid } from './validate';
 import { z } from 'zod';
 import sharp from 'sharp';
@@ -25,9 +25,51 @@ export async function selectIntent(raw:string){
   redirect(await session()?(intent.success?'/onboarding/basics?intent='+intent.data:'/onboarding/basics'):'/login');
 }
 export async function login(_:State,f:FormData):Promise<State>{
- const db=await server(), email=forms.email.safeParse(f.get('email'));
- if(!authReady||!db) return {error:'Email sign-in is not configured yet.'};
+ const email=forms.email.safeParse(f.get('email'));
+ const mode=String(f.get('mode')||'magic');
+ const password=String(f.get('password')||'');
+ const name=String(f.get('name')||'').trim();
+ if(!authReady) return {error:'Email sign-in is not configured yet.'};
  if(!email.success) return {error:'Enter a valid email address.'};
+
+ if(useNeon && neonAuthUrl){
+  if(mode==='signup'){
+   if(password.length<8) return {error:'Password must be at least 8 characters.'};
+   const res=await fetch(`${neonAuthUrl}/sign-up/email`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Origin':siteUrl},
+    body:JSON.stringify({email:email.data,password,name:name||email.data.split('@')[0],callbackURL:new URL('/auth/callback',siteUrl).href}),
+   });
+   const data=await res.json().catch(()=>({}));
+   if(!res.ok) return {error:data?.message||'Could not create account. Try signing in instead.'};
+   if(data?.user?.id){
+    await setNeonSessionCookie({id:data.user.id,email:data.user.email||email.data,name:data.user.name});
+    redirect('/app');
+   }
+   return {success:'Account created! Check your email to verify your address, or sign in.'};
+  }
+  if(mode==='signin'){
+   const res=await fetch(`${neonAuthUrl}/sign-in/email`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Origin':siteUrl},
+    body:JSON.stringify({email:email.data,password}),
+   });
+   const data=await res.json().catch(()=>({}));
+   if(!res.ok || !data?.user?.id) return {error:data?.message||'Invalid email or password.'};
+   await setNeonSessionCookie({id:data.user.id,email:data.user.email||email.data,name:data.user.name});
+   redirect('/app');
+  }
+  const res=await fetch(`${neonAuthUrl}/sign-in/magic-link`,{
+   method:'POST',
+   headers:{'Content-Type':'application/json','Origin':siteUrl},
+   body:JSON.stringify({email:email.data,callbackURL:new URL('/auth/callback',siteUrl).href}),
+  });
+  if(!res.ok) return {error:'We couldn’t send a sign-in link right now. Try password sign-up/sign-in.'};
+  return {success:'Check your email for a sign-in link. Open it in this browser to continue.'};
+ }
+
+ const db=await server();
+ if(!db) return {error:'Email sign-in is not configured yet.'};
  const {error}=await db.auth.signInWithOtp({email:email.data,options:{emailRedirectTo:new URL('/auth/callback',siteUrl).href}});
  if(error) return {error:error.status===429?'Too many attempts. Try again later.':'We couldn’t send a sign-in link. Please try again later.'};
  return {success:'Check your email for a sign-in link. Open it in this browser to continue.'};
