@@ -6,14 +6,16 @@ _Last updated: 13 November 2026_
 
 Vercel serves the public site. Production uses the connected Free Neon Postgres resource. The authentication upgrade uses managed Google sign-in and email links and requires a verified Neon user and a live provider session for each database operation. The local Supabase backend remains the CI test fixture. See the deployment runbook for migration and verification commands.
 
-Fictional profiles and rooms live in the practice area at `/try`; they never enter production inventory. Native iOS and Android preview sources and CI are in `ios-native/` and `android-native/`. The download route at `/get` checks for published artifacts before offering links.
+Fictional profiles and rooms live in the practice area at `/try`; they never enter production inventory. Production inventory returned zero live rooms during verification. Native iOS and Android preview sources and CI are in `ios-native/` and `android-native/`. Production `/get` links to the published Android debug APK, unsigned iPhone IPA and iOS Simulator ZIP. Both native apps launched locally in simulators.
+
+Production checks reached the Google account chooser from both hosting URLs and verified public and protected routes, sample matching, download availability, and the Neon migration objects. Live Google account consent, email delivery, authenticated production journeys, and physical-device native journeys remain unverified. Local lint, TypeScript, production build, 32 unit tests, 41 SQL integration tests and 27 Playwright tests passed. GitHub Actions records hosted results.
 
 ## P0
 
 | Area | State | Evidence |
 | --- | --- | --- |
 | Public landing with honest inventory, content pages, city and locality pages, public listing preview | Built, live | `tests/e2e/public.spec.ts` |
-| Magic-link sign-in, sessions, sign-out | Built; verified locally only | `tests/e2e/journeys.spec.ts` |
+| Google and magic-link sign-in, sessions, sign-out | Google initiation verified on both production hostnames; passwordless journey verified locally | `tests/e2e/journeys.spec.ts`, `tests/integration/neon-identity.test.ts` |
 | Intent, basics, lifestyle questionnaire (skip, edit, progress), privacy choices, resume | Built; verified locally | journeys spec; `tests/integration/workflows.test.ts` |
 | Listings: create, edit, photos (metadata stripped), submit, moderate, pause, reconfirm, fill, expiry | Built; verified locally | journeys spec; workflows tests |
 | Discover people and rooms: filters, sort, fit reasons, differences, missing answers, empty states | Built; verified locally | journeys spec |
@@ -23,7 +25,7 @@ Fictional profiles and rooms live in the practice area at `/try`; they never ent
 | Mutual interest, chat, unread counts, scam warning, report, block | Built; verified locally | journeys spec; workflows and hardening tests |
 | Saved items, matches list, visits (request, confirm, decline, reschedule, cancel, complete, no-show), address sharing | Built; verified locally | journeys spec; workflows tests |
 | Moderation dashboard with audit log and logged message evidence | Built; verified locally | journeys spec; `tests/integration/access.test.ts` |
-| Row-level security, server validation, rate limits | Built; verified locally | 39 integration tests |
+| Row-level security, server validation, rate limits | Built; verified locally | 41 integration tests |
 | Fixes from the independent code review (declined requests clear, any message reportable, visit address window, paused-owner listings, passed rooms, honest analytics and waitlist wording) | Built; verified locally | `tests/e2e/regressions.spec.ts` |
 | Privacy settings, data export download, support and appeal, account closure | Built; verified locally | journeys spec |
 | First-party, opt-in product events and moderator funnel counts | Built | workflows tests |
