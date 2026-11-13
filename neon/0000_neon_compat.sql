@@ -7,6 +7,9 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
     CREATE ROLE anon NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    CREATE ROLE service_role NOLOGIN;
+  END IF;
 END $$;
 
 CREATE SCHEMA IF NOT EXISTS ff_auth;
@@ -43,6 +46,6 @@ CREATE TABLE IF NOT EXISTS ff_storage.objects (
   PRIMARY KEY (bucket_id, name)
 );
 
-GRANT USAGE ON SCHEMA public, private, ff_auth, ff_storage TO authenticated, anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ff_storage TO authenticated, anon;
-GRANT SELECT ON ff_auth.users TO authenticated, anon;
+GRANT USAGE ON SCHEMA public, private, ff_auth, ff_storage TO authenticated, anon, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ff_storage TO authenticated, anon, service_role;
+GRANT SELECT ON ff_auth.users TO authenticated, anon, service_role;
