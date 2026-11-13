@@ -1,11 +1,22 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { liveListing, member, moderator, onboard as dbOnboard, sql } from '../support/local';
 import { signIn } from './helpers';
 
 /** Swipe matching: buttons, keyboard and drag all persist through the same interest RPC. */
 const tag = () => Math.random().toString(36).replace(/[^a-z]/g, '').slice(0, 5) || 'zz';
 const status = (actor: string, target: string) => sql(`select coalesce((select status::text from public.interests where actor_id='${actor}' and target_id='${target}'),'none')`);
+
+async function dragCard(page: Page, card: Locator, distance: number) {
+  await card.scrollIntoViewIfNeeded();
+  const box = (await card.boundingBox())!;
+  const start = box.x + box.width * (distance < 0 ? 0.7 : 0.3);
+  const y = box.y + Math.min(100, box.height / 2);
+  await page.mouse.move(start, y);
+  await page.mouse.down();
+  await page.mouse.move(start + distance, y, { steps: 10 });
+  await page.mouse.up();
+}
 
 test('swiping people: pass, undo, like by keyboard, and a mutual like shows a match', async ({ page }) => {
   const t = tag();
@@ -38,12 +49,7 @@ test('swiping people: pass, undo, like by keyboard, and a mutual like shows a ma
   await page.getByRole('button', { name: 'Keep swiping' }).click();
   // Drag the next card to the right to like it.
   await expect(card).toContainText(`Omi ${t}`);
-  const box = (await card.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + 120);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 60, box.y + 120, { steps: 4 });
-  await page.mouse.move(box.x + box.width / 2 + 180, box.y + 120, { steps: 6 });
-  await page.mouse.up();
+  await dragCard(page, card, 150);
   await expect(page.getByRole('heading', { name: 'You’re all caught up' })).toBeVisible();
   expect(status(me.id, other.id)).toBe('sent');
   // The match is waiting in Chats.
@@ -65,19 +71,12 @@ test('swiping rooms: a short drag snaps back, a left swipe passes, a right swipe
   await expect(card).toContainText(/Swipe room (one|two)/);
   await expect(card.getByText('₹17,000')).toBeVisible();
   const first = (await card.getAttribute('aria-label'))!;
-  const drag = async (by: number) => {
-    const box = (await card.boundingBox())!;
-    const x = box.x + box.width / 2, y = box.y + 100;
-    await page.mouse.move(x, y); await page.mouse.down();
-    await page.mouse.move(x + by / 2, y, { steps: 4 }); await page.mouse.move(x + by, y, { steps: 4 });
-    await page.mouse.up();
-  };
-  await drag(40);
+  await dragCard(page, card, 40);
   await expect(card).toHaveAttribute('aria-label', first);
-  await drag(-200);
+  await dragCard(page, card, -150);
   await expect(card).not.toHaveAttribute('aria-label', first);
   const second = (await card.getAttribute('aria-label'))!;
-  await drag(200);
+  await dragCard(page, card, 150);
   await expect(page.getByRole('heading', { name: 'You’re all caught up' })).toBeVisible();
   const owners: Record<string, string> = { [`Swipe room one ${t}`]: ownerA.id, [`Swipe room two ${t}`]: ownerB.id };
   expect(status(seeker.id, owners[first])).toBe('passed');

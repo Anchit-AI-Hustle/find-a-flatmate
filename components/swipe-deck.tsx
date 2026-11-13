@@ -89,6 +89,7 @@ export function SwipeDeck({ items, empty, matchArt }: { items: DeckItem[]; empty
           className={`swipe-card${leaving ? ' leaving' : dx ? ' dragging' : ''}`}
           style={{ transform: `translateX(${shift}px) rotate(${shift / 24}deg)` }}
           aria-label={top.name}
+          onDragStart={event => event.preventDefault()}
           onPointerDown={event => { if (event.button === 0 && !busy) { drag.current = { x: event.clientX, moved: false }; event.currentTarget.setPointerCapture(event.pointerId); } }}
           onPointerMove={event => { if (drag.current) { const d = event.clientX - drag.current.x; if (Math.abs(d) > 6) drag.current.moved = true; if (drag.current.moved) setDx(d); } }}
           onPointerUp={event => { const gesture = drag.current; drag.current = null; if (!gesture?.moved) return; const distance = event.clientX - gesture.x; if (distance > 90) choose('like'); else if (distance < -90) choose('pass'); else setDx(0); }}
