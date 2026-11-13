@@ -16,6 +16,14 @@ function getPool() {
   return _pool;
 }
 
+type DbError = { code?: string; message: string };
+type QueryResult<T> = { data: T; error: DbError | null; count?: number | null };
+
+function toDbError(e: unknown): DbError {
+  const err = e as { code?: string; message?: string };
+  return { code: err?.code, message: err?.message ?? 'Database error' };
+}
+
 function signSession(payload: { id: string; email: string; name?: string }) {
   const secret = process.env.CRON_SECRET || process.env.NEON_PROJECT_ID || 'find-a-flatmate-edge-secret';
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -74,7 +82,7 @@ async function resolveNeonAuthFromCookies(): Promise<{ id: string; email: string
           cache: 'no-store',
         });
         if (res.ok) {
-          const data = await res.json();
+          const data = (await res.json()) as { user?: { id?: string; email?: string; name?: string } };
           if (data?.user?.id && data?.user?.email) {
             const u = { id: String(data.user.id), email: String(data.user.email), name: data.user.name };
             await ensureNeonAuthUser(u);
@@ -89,12 +97,12 @@ async function resolveNeonAuthFromCookies(): Promise<{ id: string; email: string
   return null;
 }
 
-class NeonQueryBuilder<T = any> implements PromiseLike<{ data: T; error: any; count?: number | null }> {
+class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   private _table: string;
   private _selectCols = '*';
   private _countExact = false;
   private _headOnly = false;
-  private _filters: { col: string; op: string; val: any }[] = [];
+  private _filters: { col: string; op: string; val: unknown }[] = [];
   private _orderBy: { col: string; asc: boolean }[] = [];
   private _limitVal: number | null = null;
   private _single = false;
@@ -113,18 +121,18 @@ class NeonQueryBuilder<T = any> implements PromiseLike<{ data: T; error: any; co
     if (opts?.head) this._headOnly = true;
     return this;
   }
-  eq(col: string, val: any) { this._filters.push({ col, op: '=', val }); return this; }
-  neq(col: string, val: any) { this._filters.push({ col, op: '<>', val }); return this; }
-  gt(col: string, val: any) { this._filters.push({ col, op: '>', val }); return this; }
-  gte(col: string, val: any) { this._filters.push({ col, op: '>=', val }); return this; }
-  in(col: string, vals: any[]) { this._filters.push({ col, op: 'IN', val: vals }); return this; }
+  eq(col: string, val: unknown) { this._filters.push({ col, op: '=', val }); return this; }
+  neq(col: string, val: unknown) { this._filters.push({ col, op: '<>', val }); return this; }
+  gt(col: string, val: unknown) { this._filters.push({ col, op: '>', val }); return this; }
+  gte(col: string, val: unknown) { this._filters.push({ col, op: '>=', val }); return this; }
+  in(col: string, vals: unknown[]) { this._filters.push({ col, op: 'IN', val: vals }); return this; }
   not(col: string, op: string, val: string) { this._filters.push({ col, op: `NOT_${op.toUpperCase()}`, val }); return this; }
   order(col: string, opts?: { ascending?: boolean }) { this._orderBy.push({ col, asc: opts?.ascending !== false }); return this; }
   limit(n: number) { this._limitVal = n; return this; }
-  maybeSingle<U = any>() { this._single = true; this._limitVal = 1; return this as unknown as NeonQueryBuilder<U | null>; }
+  maybeSingle<U = unknown>() { this._single = true; this._limitVal = 1; return this as unknown as NeonQueryBuilder<U | null>; }
   overrideTypes<U>() { return this as unknown as NeonQueryBuilder<U>; }
 
-  private async exec(): Promise<{ data: any; error: any; count?: number | null }> {
+  private async exec(): Promise<QueryResult<T>> {
     const client = await getPool().connect();
     try {
       await client.query('BEGIN');
@@ -135,7 +143,7 @@ class NeonQueryBuilder<T = any> implements PromiseLike<{ data: T; error: any; co
         await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [this._userId]);
       }
 
-      const params: any[] = [];
+      const params: unknown[] = [];
       const whereParts: string[] = [];
       const safeIdent = (s: string) => {
         if (!/^[a-zA-Z0-9_]+$/.test(s)) throw new Error(`Invalid identifier: ${s}`);
@@ -167,7 +175,7 @@ class NeonQueryBuilder<T = any> implements PromiseLike<{ data: T; error: any; co
       if (this._headOnly && this._countExact) {
         const cRes = await client.query(`SELECT count(*)::int AS c FROM public.${table} ${whereSql}`, params);
         await client.query('COMMIT');
-        return { data: null, count: cRes.rows[0]?.c ?? 0, error: null };
+        return { data: null as T, count: cRes.rows[0]?.c ?? 0, error: null };
       }
 
       let selectExpr = '*';
@@ -191,22 +199,22 @@ class NeonQueryBuilder<T = any> implements PromiseLike<{ data: T; error: any; co
       await client.query('COMMIT');
 
       if (this._single) {
-        return { data: res.rows[0] ?? null, error: null };
+        return { data: (res.rows[0] ?? null) as T, error: null };
       }
-      return { data: res.rows, count: this._countExact ? res.rows.length : undefined, error: null };
-    } catch (e: any) {
+      return { data: res.rows as T, count: this._countExact ? res.rows.length : undefined, error: null };
+    } catch (e: unknown) {
       await client.query('ROLLBACK').catch(() => {});
-      return { data: null, error: { code: e.code, message: e.message } };
+      return { data: null as T, error: toDbError(e) };
     } finally {
       client.release();
     }
   }
 
-  then<TResult1 = { data: T; error: any; count?: number | null }, TResult2 = never>(
-    onfulfilled?: ((value: { data: T; error: any; count?: number | null }) => TResult1 | PromiseLike<TResult1>) | null,
-    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+  then<TResult1 = QueryResult<T>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult<T>) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
-    return this.exec().then(onfulfilled as any, onrejected);
+    return this.exec().then(onfulfilled ?? undefined, onrejected ?? undefined);
   }
 }
 
@@ -215,8 +223,8 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
     from(table: string) {
       return new NeonQueryBuilder(table, userId, role);
     },
-    rpc(name: string, args: Record<string, any> = {}) {
-      const execRpc = async () => {
+    rpc(name: string, args: Record<string, unknown> = {}) {
+      const execRpc = async (): Promise<{ data: unknown; error: DbError | null }> => {
         if (!/^[a-zA-Z0-9_]+$/.test(name)) return { data: null, error: { message: 'Invalid RPC' } };
         const client = await getPool().connect();
         try {
@@ -236,15 +244,17 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
           const res = await client.query(sql, params);
           await client.query('COMMIT');
           return { data: isSet ? res.rows : (res.rows[0]?.res ?? null), error: null };
-        } catch (e: any) {
+        } catch (e: unknown) {
           await client.query('ROLLBACK').catch(() => {});
-          return { data: null, error: { code: e.code, message: e.message } };
+          return { data: null, error: toDbError(e) };
         } finally {
           client.release();
         }
       };
-      const p = execRpc() as Promise<{ data: any; error: any }> & { overrideTypes: <U>() => Promise<{ data: U; error: any }> };
-      p.overrideTypes = () => p as any;
+      const p = execRpc() as Promise<{ data: unknown; error: DbError | null }> & {
+        overrideTypes: <U>() => Promise<{ data: U; error: DbError | null }>;
+      };
+      p.overrideTypes = <U>() => p as Promise<{ data: U; error: DbError | null }>;
       return p;
     },
     storage: {
@@ -252,7 +262,7 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
         return {
           async upload(path: string, fileBody: Buffer | Uint8Array | ArrayBuffer, opts?: { contentType?: string }) {
             try {
-              const buf = Buffer.isBuffer(fileBody) ? fileBody : Buffer.from(fileBody as any);
+              const buf = Buffer.isBuffer(fileBody) ? fileBody : Buffer.from(fileBody instanceof ArrayBuffer ? new Uint8Array(fileBody) : fileBody);
               await getPool().query(
                 `INSERT INTO ff_storage.objects (bucket_id, name, data, mime_type)
                  VALUES ($1, $2, $3, $4)
@@ -260,8 +270,8 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
                 [bucketId, path, buf, opts?.contentType || 'image/webp']
               );
               return { data: { path }, error: null };
-            } catch (e: any) {
-              return { data: null, error: { message: e.message } };
+            } catch (e: unknown) {
+              return { data: null, error: toDbError(e) };
             }
           },
           async download(path: string) {
@@ -270,11 +280,11 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
                 `SELECT data, mime_type FROM ff_storage.objects WHERE bucket_id = $1 AND name = $2 LIMIT 1`,
                 [bucketId, path]
               );
-              const row = res.rows[0];
+              const row = res.rows[0] as { data?: Buffer; mime_type?: string } | undefined;
               if (!row?.data) return { data: null, error: { message: 'Not found' } };
-              return { data: new Blob([row.data], { type: row.mime_type || 'image/webp' }), error: null };
-            } catch (e: any) {
-              return { data: null, error: { message: e.message } };
+              return { data: new Blob([new Uint8Array(row.data)], { type: row.mime_type || 'image/webp' }), error: null };
+            } catch (e: unknown) {
+              return { data: null, error: toDbError(e) };
             }
           },
           async list(prefix: string) {
@@ -284,14 +294,14 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
                 [bucketId, `${prefix}%`]
               );
               const seen = new Set<string>();
-              for (const r of res.rows) {
+              for (const r of res.rows as { name: string }[]) {
                 const rel = String(r.name).slice(prefix.replace(/^\//, '').length).replace(/^\//, '');
                 const seg = rel.split('/')[0];
                 if (seg) seen.add(seg);
               }
               return { data: Array.from(seen).map((name) => ({ name })), error: null };
-            } catch (e: any) {
-              return { data: [], error: { message: e.message } };
+            } catch (e: unknown) {
+              return { data: [], error: toDbError(e) };
             }
           },
           async remove(paths: string[]) {
@@ -358,7 +368,7 @@ export const session = cache(async () => {
   const db = await server();
   if (!db) return null;
   const { data: { user } } = await db.auth.getUser();
-  return user?.email_confirmed_at ? { user, db: db as SupabaseClient } : null;
+  return user?.email_confirmed_at ? { user, db } : null;
 });
 
 export type Profile = {
