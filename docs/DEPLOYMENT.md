@@ -1,7 +1,7 @@
 # Deployment
 
 - Canonical repository and Vercel Git connection use `Anchit-AI-Hustle/find-a-flatmate`, branch `main`.
-- Vercel project is `find-a-flatmate` under `anchit-ai-hustle`, with Next.js and Node 24.
+- Vercel project is `find-a-flatmate` under `anchit-ai-hustle`, with Next.js and Node 24. Functions run in Singapore alongside Neon. Scoped reads and RPCs send the transaction in one HTTPS request and check the current provider session in Postgres.
 - Production is https://find-a-flatmate.anchit-tandon.com and https://find-a-flatmate.vercel.app.
 - The connected Neon Free project is `curly-surf-73514052` in Singapore. Neon manages Google and email-link authentication. Listing images are sanitized WebP bytes in a private Postgres schema. Revisit object storage before approaching the Free database quota.
 

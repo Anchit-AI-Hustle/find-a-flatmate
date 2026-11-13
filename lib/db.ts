@@ -1,7 +1,7 @@
 import { cache } from 'react';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { Pool } from '@neondatabase/serverless';
+import { neon, Pool, types } from '@neondatabase/serverless';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { authReady, neonDbUrl, supabaseKey, supabaseUrl, useNeon } from './env';
@@ -12,9 +12,51 @@ import { mobileSecret, sha256 } from './auth/mobile';
 
 let _pool: Pool | null = null;
 export function getPool() {
-  if (!_pool) _pool = new Pool({ connectionString: neonDbUrl! });
+  if (!_pool) {
+    _pool = new Pool({
+      connectionString: neonDbUrl!,
+      connectionTimeoutMillis: 5000,
+      statement_timeout: 5000,
+    });
+    _pool.on('error', () => console.error('An idle database connection was closed.'));
+  }
   return _pool;
 }
+
+type Identity = { id: string; sessionId: string };
+type NeonRole = 'authenticated' | 'anonymous' | 'service';
+const roleSql = {
+  authenticated: 'SET LOCAL ROLE authenticated',
+  anonymous: 'SET LOCAL ROLE anonymous',
+} as const;
+const neonHttp = cache(() => neon(neonDbUrl!));
+// Match PostgREST's calendar date format for React, matching and native clients.
+const neonTypes: NonNullable<Parameters<ReturnType<typeof neon>['query']>[2]>['types'] = {
+  getTypeParser: (oid, format) => oid === types.builtins.DATE ? (value: string) => value : types.getTypeParser(oid, format),
+};
+
+async function neonRows(sql: string, params: unknown[], role: NeonRole, identity: Identity | null) {
+  const query = neonHttp();
+  const options = { fetchOptions: { signal: AbortSignal.timeout(8000), cache: 'no-store' }, types: neonTypes };
+  if (role === 'service') return query.query(sql, params, options);
+  if (role === 'authenticated' && !identity) throw new Error('Missing database session');
+  const results = await query.transaction([
+    query.query(roleSql[role]),
+    ...(identity ? [query.query(
+      "select set_config('app.current_user_id', $1, true), set_config('app.current_session_id', $2, true)",
+      [identity.id, identity.sessionId],
+    )] : []),
+    query.query(sql, params, { types: neonTypes }),
+  ], { fetchOptions: options.fetchOptions });
+  return results.at(-1) ?? [];
+}
+
+// These return row sets in the SQL migrations. All other app RPCs return
+// a single value (including JSON arrays) or no value.
+const rowSetRpcs = new Set([
+  'discover_people', 'export_sent_messages', 'inbox', 'moderation_profiles',
+  'public_inventory', 'public_rooms',
+]);
 
 type DbError = { code?: string; message: string };
 type QueryResult<T> = { data: T; error: DbError | null; count?: number | null };
@@ -28,9 +70,14 @@ const resolveNeonAuth = cache(async () => {
   const user = await verifiedNeonUser();
   if (!user) return null;
   // The database only copies identity from a confirmed, non-banned Neon user.
-  const { rows } = await getPool().query(
-    'select private.sync_neon_identity($1::uuid) as verified_at',
-    [user.id],
+  const rows = await neonRows(
+    `select coalesce(
+      (select email_confirmed_at from ff_auth.users where id=$1 and email=lower($2)),
+      private.sync_neon_identity($1)
+    ) as verified_at`,
+    [user.id, user.email],
+    'service',
+    null,
   );
   const verifiedAt = rows[0]?.verified_at;
   if (!(verifiedAt instanceof Date)) return null;
@@ -52,10 +99,10 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   private _orderBy: { col: string; asc: boolean }[] = [];
   private _limitVal: number | null = null;
   private _single = false;
-  private _identity: { id: string; sessionId: string } | null;
-  private _role: 'authenticated' | 'anonymous' | 'service';
+  private _identity: Identity | null;
+  private _role: NeonRole;
 
-  constructor(table: string, identity: { id: string; sessionId: string } | null, role: 'authenticated' | 'anonymous' | 'service') {
+  constructor(table: string, identity: Identity | null, role: NeonRole) {
     this._table = table;
     this._identity = identity;
     this._role = role;
@@ -80,16 +127,7 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   overrideTypes<U>() { return this as unknown as NeonQueryBuilder<U>; }
 
   private async exec(): Promise<QueryResult<T>> {
-    const client = await getPool().connect();
     try {
-      await client.query('BEGIN');
-      if (this._role !== 'service') {
-        await client.query(`SET LOCAL ROLE ${this._role}`);
-      }
-      if (this._identity) {
-        await client.query("SELECT set_config('app.current_user_id', $1, true), set_config('app.current_session_id', $2, true)", [this._identity.id, this._identity.sessionId]);
-      }
-
       const params: unknown[] = [];
       const whereParts: string[] = [];
       const safeIdent = (s: string) => {
@@ -120,9 +158,8 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
       const table = safeIdent(this._table);
 
       if (this._headOnly && this._countExact) {
-        const cRes = await client.query(`SELECT count(*)::int AS c FROM public.${table} ${whereSql}`, params);
-        await client.query('COMMIT');
-        return { data: null as T, count: cRes.rows[0]?.c ?? 0, error: null };
+        const rows = await neonRows(`SELECT count(*)::int AS c FROM public.${table} ${whereSql}`, params, this._role, this._identity);
+        return { data: null as T, count: rows[0]?.c ?? 0, error: null };
       }
 
       let selectExpr = '*';
@@ -142,18 +179,14 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
         : '';
       const limitSql = this._limitVal !== null ? `LIMIT ${Number(this._limitVal)}` : '';
 
-      const res = await client.query(`SELECT ${selectExpr} FROM public.${table} ${whereSql} ${orderSql} ${limitSql}`, params);
-      await client.query('COMMIT');
+      const rows = await neonRows(`SELECT ${selectExpr} FROM public.${table} ${whereSql} ${orderSql} ${limitSql}`, params, this._role, this._identity);
 
       if (this._single) {
-        return { data: (res.rows[0] ?? null) as T, error: null };
+        return { data: (rows[0] ?? null) as T, error: null };
       }
-      return { data: res.rows as T, count: this._countExact ? res.rows.length : undefined, error: null };
+      return { data: rows as T, count: this._countExact ? rows.length : undefined, error: null };
     } catch (e: unknown) {
-      await client.query('ROLLBACK').catch(() => {});
       return { data: null as T, error: toDbError(e) };
-    } finally {
-      client.release();
     }
   }
 
@@ -165,7 +198,7 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   }
 }
 
-function createNeonDbClient(identity: { id: string; sessionId: string } | null, role: 'authenticated' | 'anonymous' | 'service') {
+function createNeonDbClient(identity: Identity | null, role: NeonRole) {
   return {
     from(table: string) {
       return new NeonQueryBuilder(table, identity, role);
@@ -173,32 +206,19 @@ function createNeonDbClient(identity: { id: string; sessionId: string } | null, 
     rpc(name: string, args: Record<string, unknown> = {}) {
       const execRpc = async (): Promise<{ data: unknown; error: DbError | null }> => {
         if (!/^[a-zA-Z0-9_]+$/.test(name)) return { data: null, error: { message: 'Invalid RPC' } };
-        const client = await getPool().connect();
         try {
-          await client.query('BEGIN');
-          if (role !== 'service') await client.query(`SET LOCAL ROLE ${role}`);
-          if (identity) await client.query("SELECT set_config('app.current_user_id', $1, true), set_config('app.current_session_id', $2, true)", [identity.id, identity.sessionId]);
-
           const keys = Object.keys(args).filter((k) => args[k] !== undefined);
           const params = keys.map((k) => args[k]);
           const argList = keys.map((k, i) => {
             if (!/^[a-z][a-z0-9_]*$/.test(k)) throw new Error('Invalid RPC argument');
             return `${k} => $${i + 1}`;
           }).join(', ');
-          const meta = await client.query(
-            `SELECT proretset FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 LIMIT 1`,
-            [name]
-          );
-          const isSet = meta.rows[0]?.proretset === true;
+          const isSet = rowSetRpcs.has(name);
           const sql = isSet ? `SELECT * FROM public.${name}(${argList})` : `SELECT public.${name}(${argList}) AS res`;
-          const res = await client.query(sql, params);
-          await client.query('COMMIT');
-          return { data: isSet ? res.rows : (res.rows[0]?.res ?? null), error: null };
+          const rows = await neonRows(sql, params, role, identity);
+          return { data: isSet ? rows : (rows[0]?.res ?? null), error: null };
         } catch (e: unknown) {
-          await client.query('ROLLBACK').catch(() => {});
           return { data: null, error: toDbError(e) };
-        } finally {
-          client.release();
         }
       };
       const p = execRpc() as Promise<{ data: unknown; error: DbError | null }> & {

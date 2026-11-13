@@ -25,7 +25,7 @@ export function TabBar({ unread, requests }: { unread: number; requests: number 
       {tabs.map(({ href, label, icon: Icon }) => {
         const count = href === '/app/messages' ? unread : href === '/app/matches' ? requests : 0;
         return (
-          <Link key={href} href={href} aria-current={active(path, href) ? 'page' : undefined}>
+          <Link key={href} href={href} prefetch={false} aria-current={active(path, href) ? 'page' : undefined}>
             <Icon size={22} aria-hidden="true" />{label}
             {count ? <span className="badge">{count > 9 ? '9+' : count}<span className="sr"> new</span></span> : null}
           </Link>
@@ -41,13 +41,13 @@ export function SideNav({ unread, requests, moderator }: { unread: number; reque
       {[...tabs.slice(0, 4), ...more.slice(0, 3), tabs[4], more[3]].map(({ href, label, icon: Icon }) => {
         const count = href === '/app/messages' ? unread : href === '/app/matches' ? requests : 0;
         return (
-          <Link key={href} className="nav" href={href} aria-current={active(path, href) ? 'page' : undefined}>
+          <Link key={href} className="nav" href={href} prefetch={false} aria-current={active(path, href) ? 'page' : undefined}>
             <Icon size={19} aria-hidden="true" />{label === 'You' ? 'Profile' : label === 'Chats' ? 'Messages' : label}
             {count ? <span className="count">{count}<span className="sr"> new</span></span> : null}
           </Link>
         );
       })}
-      {moderator ? <Link className="nav" href="/admin"><ShieldAlert size={19} aria-hidden="true" />Moderation</Link> : null}
+      {moderator ? <Link className="nav" href="/admin" prefetch={false}><ShieldAlert size={19} aria-hidden="true" />Moderation</Link> : null}
     </>
   );
 }

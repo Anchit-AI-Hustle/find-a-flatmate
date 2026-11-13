@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { after } from 'next/server';
 import { LayoutList, Layers, SlidersHorizontal } from 'lucide-react';
 import { PersonDeckCard, RoomDeckCard } from '@/components/deck-cards';
 import { SwipeDeck, type DeckItem } from '@/components/swipe-deck';
@@ -27,9 +28,10 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     db.from('interests').select('actor_id,target_id,status'),
     db.from('saved_items').select('profile_id,listing_id').eq('user_id', user.id),
   ]);
+  if (interestRows.error || savedRows.error) throw new Error('Unable to load discovery preferences');
   const interests = (interestRows.data ?? []) as Interest[];
   const saved = (savedRows.data ?? []) as { profile_id: string | null; listing_id: string | null }[];
-  void db.rpc('track_product_event', { event_name: 'discover_view' }).then(() => {}, () => {});
+  after(async () => { await db.rpc('track_product_event', { event_name: 'discover_view' }); });
 
   const listView = q.view === 'list';
   const deck: DeckItem[] = [];
@@ -42,7 +44,8 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     if (q.type && Object.hasOwn(roomTypes, q.type)) query = query.eq('room_type', q.type);
     if (max !== null) query = query.lte('monthly', max);
     query = q.sort === 'new' ? query.order('created_at', { ascending: false }) : query.order('available_from');
-    const { data } = await query.limit(60).overrideTypes<Listing[], { merge: false }>();
+    const { data, error } = await query.limit(60).overrideTypes<Listing[], { merge: false }>();
+    if (error) throw new Error('Unable to load rooms');
     const passed = new Set(interests.filter(i => i.actor_id === user.id && i.status === 'passed').map(i => i.target_id));
     let list = (data ?? []).filter(l => !passed.has(l.owner_id)).map(l => ({ l, result: matchRoom(self, room(l)) }));
     if (q.amenity && (amenities as readonly string[]).includes(q.amenity)) list = list.filter(x => x.l.listing_amenities?.some(a => a.amenity === q.amenity));
@@ -52,7 +55,8 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     for (const { l, result } of list) if (!result.hard_fail_reasons.length && !relate(interests, user.id, l.owner_id).mine) deck.push({ key: l.id, target: l.owner_id, listing: l.id, name: l.title, href: `/app/rooms/${l.id}`, card: <RoomDeckCard l={l} result={result} /> });
     cards = list.map(({ l, result }) => <RoomCard key={l.id} listing={l} result={result} relation={relate(interests, user.id, l.owner_id)} saved={saved.some(s => s.listing_id === l.id)} />);
   } else {
-    const { data } = await db.rpc('discover_people', { city });
+    const { data, error } = await db.rpc('discover_people', { city });
+    if (error) throw new Error('Unable to load people');
     let list = ((data ?? []) as Candidate[]).map(c => ({ c, result: matchPeople(self, person(c, c.answers)) }));
     if (q.area && Object.hasOwn(areas, q.area)) list = list.filter(x => x.c.localities.includes(q.area!));
     if (q.intent && Object.hasOwn(intents, q.intent)) list = list.filter(x => x.c.intent === q.intent);
