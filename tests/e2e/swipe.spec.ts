@@ -50,8 +50,8 @@ test('swiping people: pass, undo, like by keyboard, and a mutual like shows a ma
   // Drag the next card to the right to like it.
   await expect(card).toContainText(`Omi ${t}`);
   await dragCard(page, card, 150);
-  await expect(page.getByRole('heading', { name: 'You’re all caught up' })).toBeVisible();
-  expect(status(me.id, other.id)).toBe('sent');
+  await expect.poll(() => status(me.id, other.id)).toBe('sent');
+  await expect(page.getByRole('heading', { name: `Omi ${t}`, exact: true })).toHaveCount(0);
   // The match is waiting in Chats.
   await page.goto('/app/messages');
   await expect(page.getByRole('link', { name: new RegExp(`Lata ${t}`) })).toBeVisible();
@@ -77,8 +77,8 @@ test('swiping rooms: a short drag snaps back, a left swipe passes, a right swipe
   await expect(card).not.toHaveAttribute('aria-label', first);
   const second = (await card.getAttribute('aria-label'))!;
   await dragCard(page, card, 150);
-  await expect(page.getByRole('heading', { name: 'You’re all caught up' })).toBeVisible();
   const owners: Record<string, string> = { [`Swipe room one ${t}`]: ownerA.id, [`Swipe room two ${t}`]: ownerB.id };
   expect(status(seeker.id, owners[first])).toBe('passed');
-  expect(status(seeker.id, owners[second])).toBe('sent');
+  await expect.poll(() => status(seeker.id, owners[second])).toBe('sent');
+  await expect(page.getByRole('heading', { name: second, exact: true })).toHaveCount(0);
 });

@@ -235,9 +235,11 @@ test('moderator investigates, reads only the reported message with a logged reas
   await report.getByLabel('Justification for reading the message').fill('Need the exact wording to decide');
   await report.getByRole('button', { name: 'Read the reported message' }).click();
   await expect(report.getByText('Please send a token amount by UPI today to hold the room.')).toBeVisible();
-  await report.getByLabel('Reason to suspend the reported member').fill('Requested advance payment before a visit');
+  const suspensionReason = `Requested advance payment before a visit (${tag})`;
+  await report.getByLabel('Reason to suspend the reported member').fill(suspensionReason);
   await report.getByRole('button', { name: 'Suspend the reported member' }).click();
-  await expect(m.getByRole('cell', { name: 'profile.suspend' }).first()).toBeVisible();
+  const suspension = m.getByRole('row').filter({ hasText: suspensionReason });
+  await expect(suspension.getByRole('cell', { name: 'profile.suspend', exact: true })).toBeVisible();
   await expect(m.getByRole('cell', { name: 'report.read_reported_message' }).first()).toBeVisible();
   // The suspended member is locked out of the app but can still appeal and export.
   await p.goto('/app/discover');
