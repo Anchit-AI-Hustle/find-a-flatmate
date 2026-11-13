@@ -92,6 +92,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
         <Link className="btn small" href={params({ view: listView ? '' : 'list' })} aria-label={listView ? 'Switch to swipe cards' : 'Switch to list view'}>{listView ? <><Layers size={16} aria-hidden="true" /> Cards</> : <><LayoutList size={16} aria-hidden="true" /> List</>}</Link>
       </div>
       {profile.status === 'paused' ? <p className="note warn">Your profile is paused, so Discover is empty and nobody can find you. <Link href="/app/settings/privacy">Resume your profile</Link></p> : null}
+      <p className="small"><Link href="/try">Try matching with sample people and rooms</Link></p>
       <nav className="segmented" aria-label="What to show">
         <Link href={listView ? '/app/discover?view=list' : '/app/discover'} aria-current={rooms ? undefined : 'true'}>People</Link>
         <Link href={listView ? '/app/discover?mode=rooms&view=list' : '/app/discover?mode=rooms'} aria-current={rooms ? 'true' : undefined}>Rooms</Link>

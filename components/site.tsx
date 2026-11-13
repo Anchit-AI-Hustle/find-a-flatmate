@@ -37,7 +37,7 @@ export function SiteFooter() {
         <nav aria-label="Footer">
           <Link href="/how-it-works">How it works</Link>
           <Link href="/safety">Safety</Link>
-          <Link href="/pricing">Pricing</Link>
+          <Link href="/pricing">Pricing</Link><Link href="/get">Get the app</Link><Link href="/try">Try matching</Link>
           <Link href="/about">About</Link>
           <Link href="/help">Help</Link>
           <Link href="/community-guidelines">Community guidelines</Link>

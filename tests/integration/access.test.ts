@@ -32,6 +32,7 @@ describe('signed-out visitors', () => {
     const db = anon();
     expect((await db.rpc('discover_people', { city: 'gurugram' })).error).not.toBeNull();
     expect((await db.rpc('inbox')).error).not.toBeNull();
+    expect((await db.rpc('export_sent_messages')).error).not.toBeNull();
     expect((await db.storage.from('room-photos').list(a.id)).data ?? []).toHaveLength(0);
   });
 });
@@ -126,4 +127,13 @@ describe('service role boundary', () => {
     const r = await service.rpc('attach_sanitized_photo', { u: a.id, l: room, p: `${c.id}/${room}/${crypto.randomUUID()}.webp`, d: 'b'.repeat(64) });
     expect(r.error?.message).toMatch(/Invalid photo/);
   });
+});
+
+it('exports only the signed-in sender’s words after a block', async () => {
+  expect((await b.db.rpc('block_account', { target: a.id })).error).toBeNull();
+  expect((await a.db.from('messages').select('id').eq('conversation_id', chat)).data).toEqual([]);
+  const exported = await a.db.rpc('export_sent_messages');
+  expect(exported.error).toBeNull();
+  expect(exported.data).toEqual([expect.objectContaining({ conversation_id: chat, body: 'Hello Ravi, the room is free from next week.' })]);
+  expect((await b.db.rpc('export_sent_messages')).data).toEqual([]);
 });

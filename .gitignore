@@ -13,3 +13,14 @@ playwright-report/
 test-results/
 coverage/
 .DS_Store
+ios-native/*.xcodeproj/
+ios-native/build/
+android-native/.gradle/
+android-native/local.properties
+android-native/app/build/
+android-native/build/
+*.keystore
+*.jks
+*.ipa
+*.apk
+ios-native/artifacts/

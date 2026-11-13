@@ -1,10 +1,12 @@
 # Implementation status
 
-_Last updated: 12 November 2026_
+_Last updated: 13 November 2026_
 
 ## Where it stands
 
-The P0 product is built and passes its tests against a real local Supabase stack. **It is not usable by the public yet**, because the production Supabase project could not be created (account at the free-project limit). The live site therefore serves the public pages with sign-in switched off and says so.
+Vercel serves the public site. Production uses the connected Free Neon Postgres resource. The authentication upgrade uses managed Google sign-in and email links and requires a verified Neon user and a live provider session for each database operation. The local Supabase backend remains the CI test fixture. See the deployment runbook for migration and verification commands.
+
+Fictional profiles and rooms live in the practice area at `/try`; they never enter production inventory. Native iOS and Android preview sources and CI are in `ios-native/` and `android-native/`. The download route at `/get` checks for published artifacts before offering links.
 
 ## P0
 
@@ -27,7 +29,7 @@ The P0 product is built and passes its tests against a real local Supabase stack
 | First-party, opt-in product events and moderator funnel counts | Built | workflows tests |
 | Installable PWA: manifest, icons, offline page, service worker | Built, live | public spec |
 | CI: lint, typecheck, unit, build, database and browser suites | Built | `.github/workflows/ci.yml` |
-| Production database, auth and storage | **Blocked** | `docs/DEPLOYMENT.md` |
+| Production database, auth and storage | Neon Postgres and managed Auth | `docs/DEPLOYMENT.md` |
 
 ## Not built (stated honestly in the app)
 
@@ -36,9 +38,9 @@ The P0 product is built and passes its tests against a real local Supabase stack
 | Group search, shared shortlist, household agreement checklist, expenses calculator | P1 | `/app/group` says "coming later" and offers the city waitlist |
 | Reminder notifications | P1 | The preference is stored; nothing is sent, and the setting says so |
 | Referral links, saved searches, duplicate-photo detection across listings | P1 | — |
-| Google sign-in, phone OTP | — | Email magic link only |
+| Phone OTP | — | Google and email links cover passwordless access |
 | Payments, paid plans, concierge, ID or background checks, AI assistance | P2 | No fake checkout or badge exists; feature flags are present and off |
-| Native iOS and Android store apps | — | The site installs to the home screen as a PWA; no store submission exists |
+| Native iOS and Android store listing | — | Native previews use `/get`; store submission and signing are separate |
 | Tailwind and shadcn/ui | — | Plain CSS tokens were used instead; see `docs/UX-DECISIONS.md` |
 | Lighthouse and Core Web Vitals measurements | — | Not run; no score is claimed |
 
@@ -46,8 +48,8 @@ The P0 product is built and passes its tests against a real local Supabase stack
 
 See `docs/THREAT-MODEL.md` for the full list. The ones that matter most before a public pilot:
 
-1. No production database (blocker).
-2. Supabase's built-in email sender is too limited for magic-link sign-in; a custom SMTP sender is needed.
+1. Verify Google OAuth and email delivery in a controlled real browser session before inviting pilot users.
+2. Neon’s shared email sender is quota-limited. Confirm deliverability for the pilot.
 3. Account deletion is completed by an operator, not automatically.
 4. No CAPTCHA on sign-in and no script-restricting Content-Security-Policy.
 5. Legal pages are drafts; no legal or DPDP review has taken place.

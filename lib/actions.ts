@@ -1,15 +1,16 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { authReady,neonAuthUrl,siteUrl,useNeon } from './env';
-import { server,session,service,setNeonSessionCookie } from './db';
+import { authReady,siteUrl,useNeon } from './env';
+import { server,session,service } from './db';
 import { forms,formFields,readAnswers,uuid } from './validate';
 import { z } from 'zod';
 import sharp from 'sharp';
 import {createHash,randomUUID} from 'node:crypto';
 import {cookies} from 'next/headers';
+import { authOrigin, googleRedirect, neonAuth, sendMagicLink } from './auth/neon';
 
-export type State={error?:string;success?:string;evidence?:string;match?:string};
+export type State={error?:string;success?:string;evidence?:string;match?:string;listing?:string};
 const success={success:'Saved.'};
 function friendly(error:{code?:string;message:string}){
   if(error.code==='P0001') return error.message;
@@ -26,46 +27,24 @@ export async function selectIntent(raw:string){
 }
 export async function login(_:State,f:FormData):Promise<State>{
  const email=forms.email.safeParse(f.get('email'));
- const mode=String(f.get('mode')||'magic');
- const password=String(f.get('password')||'');
- const name=String(f.get('name')||'').trim();
- if(!authReady) return {error:'Email sign-in is not configured yet.'};
- if(!email.success) return {error:'Enter a valid email address.'};
+ if (!authReady) return { error: 'Sign-in is unavailable right now.' };
+ if (!email.success) return { error: 'Enter a valid email address.' };
 
- if(useNeon && neonAuthUrl){
-  if(mode==='signup'){
-   if(password.length<8) return {error:'Password must be at least 8 characters.'};
-   const res=await fetch(`${neonAuthUrl}/sign-up/email`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Origin':siteUrl},
-    body:JSON.stringify({email:email.data,password,name:name||email.data.split('@')[0],callbackURL:new URL('/auth/callback',siteUrl).href}),
+ if (useNeon) {
+   const auth = neonAuth();
+   if (!auth) return { error: 'Sign-in is unavailable right now.' };
+   const origin = await authOrigin();
+   const destination = authDestination(f.get('returnTo'));
+   const callbackURL = new URL(destination, origin).href;
+   const { error } = await sendMagicLink(auth, {
+     email: email.data,
+     callbackURL,
+     newUserCallbackURL: callbackURL,
+     errorCallbackURL: new URL('/login?expired=1', origin).href,
    });
-   const data=await res.json().catch(()=>({}));
-   if(!res.ok) return {error:data?.message||'Could not create account. Try signing in instead.'};
-   if(data?.user?.id){
-    await setNeonSessionCookie({id:data.user.id,email:data.user.email||email.data,name:data.user.name});
-    redirect('/app');
-   }
-   return {success:'Account created! Check your email to verify your address, or sign in.'};
-  }
-  if(mode==='signin'){
-   const res=await fetch(`${neonAuthUrl}/sign-in/email`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Origin':siteUrl},
-    body:JSON.stringify({email:email.data,password}),
-   });
-   const data=await res.json().catch(()=>({}));
-   if(!res.ok || !data?.user?.id) return {error:data?.message||'Invalid email or password.'};
-   await setNeonSessionCookie({id:data.user.id,email:data.user.email||email.data,name:data.user.name});
-   redirect('/app');
-  }
-  const res=await fetch(`${neonAuthUrl}/sign-in/magic-link`,{
-   method:'POST',
-   headers:{'Content-Type':'application/json','Origin':siteUrl},
-   body:JSON.stringify({email:email.data,callbackURL:new URL('/auth/callback',siteUrl).href}),
-  });
-  if(!res.ok) return {error:'We couldn’t send a sign-in link right now. Try password sign-up/sign-in.'};
-  return {success:'Check your email for a sign-in link. Open it in this browser to continue.'};
+   if (error && error.status === 429) return { error: 'Too many attempts. Try again later.' };
+   if (error) return { error: 'We couldn’t send a sign-in link. Try Google or try again shortly.' };
+   return { success: 'Check your email for a sign-in link. Open it in this browser to continue.' };
  }
 
  const db=await server();
@@ -74,10 +53,46 @@ export async function login(_:State,f:FormData):Promise<State>{
  if(error) return {error:error.status===429?'Too many attempts. Try again later.':'We couldn’t send a sign-in link. Please try again later.'};
  return {success:'Check your email for a sign-in link. Open it in this browser to continue.'};
 }
-export async function logout(){
- const db=await server();
- if(db) await db.auth.signOut({scope:'local'});
- redirect('/');
+function authDestination(value: FormDataEntryValue | null) {
+  if (typeof value !== 'string') return '/app';
+  const q = new URLSearchParams(value.startsWith('/mobile/authorize?') ? value.slice('/mobile/authorize?'.length) : '');
+  const challenge = z.string().regex(/^[A-Za-z0-9_-]{43}$/).safeParse(q.get('challenge'));
+  return challenge.success ? '/mobile/authorize?challenge=' + challenge.data : '/app';
+}
+
+export async function googleLogin(_: State, form: FormData): Promise<State> {
+  const auth = useNeon && authReady ? neonAuth() : null;
+  if (!auth) return { error: 'Google sign-in is unavailable right now.' };
+  const origin = await authOrigin();
+  const destination = new URL(authDestination(form.get('returnTo')), origin).href;
+  const { data, error } = await auth.signIn.social({
+    provider: 'google',
+    callbackURL: destination,
+    newUserCallbackURL: destination,
+    errorCallbackURL: new URL('/login?expired=1', origin).href,
+    disableRedirect: true,
+  });
+  if (error || !data?.url) return { error: 'Google sign-in could not start. Try again or use email.' };
+  const next = googleRedirect(data.url);
+  if (!next) {
+    return { error: 'Google sign-in returned an unexpected destination.' };
+  }
+  redirect(next);
+}
+
+export async function logout() {
+  if (useNeon) {
+    const auth = neonAuth();
+    if (auth) {
+      const { error } = await auth.signOut();
+      if (error) redirect('/app/settings?signoutError=1');
+    }
+    (await cookies()).delete('ff_neon_session');
+  } else {
+    const db = await server();
+    if (db) await db.auth.signOut({ scope: 'local' });
+  }
+  redirect('/');
 }
 function parse<T extends z.ZodType>(schema:T,f:FormData,nullable:string[]=[],extra:Record<string,unknown>={}):z.output<T>{
  const vals:Record<string,FormDataEntryValue|null>=formFields(f);
@@ -96,7 +111,7 @@ async function removePhotos(owner:string){
  }
 }
 export type Op='basics'|'lifestyle'|'privacy'|'listing'|'listingState'|'interest'|'save'|'block'|'report'|'message'|'visit'|'location'|'request'|'moderate'|'evidence'|'waitlist'|'feedback'|'found'|'upload'|'removePhoto';
-export async function action(op:Op, _:State,f:FormData):Promise<State>{
+export async function action(op:Op, _:State,f:FormData, source?:'mobile'):Promise<State>{
  const auth=await session();
  if(!auth) return {error:'Sign in again to continue.'};
  const {db,user}=auth;
@@ -116,7 +131,7 @@ export async function action(op:Op, _:State,f:FormData):Promise<State>{
    const {id,...data}=parse(forms.listing,f,['id'],{amenities:f.getAll('amenities')});
    const saved=uuid.parse(await rpc('save_listing',{l:id,v:{...data,rules:readAnswers(f)}}));
    if(!id) next='/app/listings/'+saved+'/edit';
-   result={success:'Draft saved. Submit it for review when ready.'};
+   result={success:'Draft saved. Submit it for review when ready.',listing:saved};
    break;
   }
   case 'listingState':{const {id,action}=parse(forms.listingState,f);await rpc('listing_transition',{l:id,action});break;}
@@ -174,6 +189,6 @@ export async function action(op:Op, _:State,f:FormData):Promise<State>{
  }
  revalidatePath(defaultPath,'layout');
  revalidatePath('/admin');
- if(next) redirect(next);
+ if(next && source !== 'mobile') redirect(next);
  return result;
 }

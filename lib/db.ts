@@ -2,16 +2,16 @@ import { cache } from 'react';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Pool } from '@neondatabase/serverless';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { createHmac } from 'node:crypto';
-import { authReady, neonAuthUrl, neonDbUrl, supabaseKey, supabaseUrl, useNeon } from './env';
+import { authReady, neonDbUrl, supabaseKey, supabaseUrl, useNeon } from './env';
 import type { Answers, Person, Room } from './matching';
 import type { Costs } from './catalog';
+import { verifiedNeonUser } from './auth/neon';
+import { mobileSecret, sha256 } from './auth/mobile';
 
-const SESSION_COOKIE = 'ff_neon_session';
 let _pool: Pool | null = null;
-function getPool() {
+export function getPool() {
   if (!_pool) _pool = new Pool({ connectionString: neonDbUrl! });
   return _pool;
 }
@@ -24,78 +24,24 @@ function toDbError(e: unknown): DbError {
   return { code: err?.code, message: err?.message ?? 'Database error' };
 }
 
-function signSession(payload: { id: string; email: string; name?: string }) {
-  const secret = process.env.CRON_SECRET || process.env.NEON_PROJECT_ID || 'find-a-flatmate-edge-secret';
-  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig = createHmac('sha256', secret).update(data).digest('base64url');
-  return `${data}.${sig}`;
-}
-
-function verifySessionToken(token?: string | null): { id: string; email: string; name?: string } | null {
-  if (!token || !token.includes('.')) return null;
-  const [data, sig] = token.split('.');
-  const secret = process.env.CRON_SECRET || process.env.NEON_PROJECT_ID || 'find-a-flatmate-edge-secret';
-  const expected = createHmac('sha256', secret).update(data).digest('base64url');
-  if (sig !== expected) return null;
-  try {
-    return JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
-  } catch {
-    return null;
-  }
-}
-
-export async function ensureNeonAuthUser(user: { id: string; email: string; name?: string }) {
-  const pool = getPool();
-  await pool.query(
-    `INSERT INTO ff_auth.users (id, email, email_confirmed_at, raw_user_meta_data)
-     VALUES ($1::uuid, $2, now(), $3::jsonb)
-     ON CONFLICT (id) DO UPDATE
-     SET email = EXCLUDED.email,
-         email_confirmed_at = COALESCE(ff_auth.users.email_confirmed_at, now())`,
-    [user.id, user.email.toLowerCase(), JSON.stringify({ name: user.name || '' })]
+const resolveNeonAuth = cache(async () => {
+  const user = await verifiedNeonUser();
+  if (!user) return null;
+  // The database only copies identity from a confirmed, non-banned Neon user.
+  const { rows } = await getPool().query(
+    'select private.sync_neon_identity($1::uuid) as verified_at',
+    [user.id],
   );
-}
-
-export async function setNeonSessionCookie(user: { id: string; email: string; name?: string }) {
-  await ensureNeonAuthUser(user);
-  const jar = await cookies();
-  jar.set(SESSION_COOKIE, signSession(user), {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 60 * 60 * 24 * 30,
-    path: '/',
-  });
-}
-
-async function resolveNeonAuthFromCookies(): Promise<{ id: string; email: string; name?: string } | null> {
-  const jar = await cookies();
-  const local = verifySessionToken(jar.get(SESSION_COOKIE)?.value);
-  if (local) return local;
-
-  if (neonAuthUrl) {
-    const cookieHeader = jar.getAll().map((c) => `${c.name}=${c.value}`).join('; ');
-    if (cookieHeader) {
-      try {
-        const res = await fetch(`${neonAuthUrl}/get-session`, {
-          headers: { cookie: cookieHeader },
-          cache: 'no-store',
-        });
-        if (res.ok) {
-          const data = (await res.json()) as { user?: { id?: string; email?: string; name?: string } };
-          if (data?.user?.id && data?.user?.email) {
-            const u = { id: String(data.user.id), email: String(data.user.email), name: data.user.name };
-            await ensureNeonAuthUser(u);
-            return u;
-          }
-        }
-      } catch {
-        // Ignore network errors
-      }
-    }
-  }
-  return null;
-}
+  const verifiedAt = rows[0]?.verified_at;
+  if (!(verifiedAt instanceof Date)) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    email_confirmed_at: verifiedAt.toISOString(),
+    created_at: user.createdAt.toISOString(),
+    sessionId: user.sessionId,
+  };
+});
 
 class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   private _table: string;
@@ -106,12 +52,12 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   private _orderBy: { col: string; asc: boolean }[] = [];
   private _limitVal: number | null = null;
   private _single = false;
-  private _userId: string | null;
-  private _role: 'authenticated' | 'anon' | 'service';
+  private _identity: { id: string; sessionId: string } | null;
+  private _role: 'authenticated' | 'anonymous' | 'service';
 
-  constructor(table: string, userId: string | null, role: 'authenticated' | 'anon' | 'service') {
+  constructor(table: string, identity: { id: string; sessionId: string } | null, role: 'authenticated' | 'anonymous' | 'service') {
     this._table = table;
-    this._userId = userId;
+    this._identity = identity;
     this._role = role;
   }
 
@@ -124,6 +70,7 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   eq(col: string, val: unknown) { this._filters.push({ col, op: '=', val }); return this; }
   neq(col: string, val: unknown) { this._filters.push({ col, op: '<>', val }); return this; }
   gt(col: string, val: unknown) { this._filters.push({ col, op: '>', val }); return this; }
+  lte(col: string, val: unknown) { this._filters.push({ col, op: '<=', val }); return this; }
   gte(col: string, val: unknown) { this._filters.push({ col, op: '>=', val }); return this; }
   in(col: string, vals: unknown[]) { this._filters.push({ col, op: 'IN', val: vals }); return this; }
   not(col: string, op: string, val: string) { this._filters.push({ col, op: `NOT_${op.toUpperCase()}`, val }); return this; }
@@ -139,8 +86,8 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
       if (this._role !== 'service') {
         await client.query(`SET LOCAL ROLE ${this._role}`);
       }
-      if (this._userId) {
-        await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [this._userId]);
+      if (this._identity) {
+        await client.query("SELECT set_config('app.current_user_id', $1, true), set_config('app.current_session_id', $2, true)", [this._identity.id, this._identity.sessionId]);
       }
 
       const params: unknown[] = [];
@@ -218,10 +165,10 @@ class NeonQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
   }
 }
 
-function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon' | 'service') {
+function createNeonDbClient(identity: { id: string; sessionId: string } | null, role: 'authenticated' | 'anonymous' | 'service') {
   return {
     from(table: string) {
-      return new NeonQueryBuilder(table, userId, role);
+      return new NeonQueryBuilder(table, identity, role);
     },
     rpc(name: string, args: Record<string, unknown> = {}) {
       const execRpc = async (): Promise<{ data: unknown; error: DbError | null }> => {
@@ -230,11 +177,14 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
         try {
           await client.query('BEGIN');
           if (role !== 'service') await client.query(`SET LOCAL ROLE ${role}`);
-          if (userId) await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [userId]);
+          if (identity) await client.query("SELECT set_config('app.current_user_id', $1, true), set_config('app.current_session_id', $2, true)", [identity.id, identity.sessionId]);
 
           const keys = Object.keys(args).filter((k) => args[k] !== undefined);
           const params = keys.map((k) => args[k]);
-          const argList = keys.map((k, i) => `${k} => $${i + 1}`).join(', ');
+          const argList = keys.map((k, i) => {
+            if (!/^[a-z][a-z0-9_]*$/.test(k)) throw new Error('Invalid RPC argument');
+            return `${k} => $${i + 1}`;
+          }).join(', ');
           const meta = await client.query(
             `SELECT proretset FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 LIMIT 1`,
             [name]
@@ -312,36 +262,15 @@ function createNeonDbClient(userId: string | null, role: 'authenticated' | 'anon
         };
       },
     },
-    auth: {
-      async getUser() {
-        const u = await resolveNeonAuthFromCookies();
-        if (!u) return { data: { user: null }, error: null };
-        return {
-          data: {
-            user: {
-              id: u.id,
-              email: u.email,
-              email_confirmed_at: new Date().toISOString(),
-              user_metadata: { name: u.name || '' },
-            },
-          },
-          error: null,
-        };
-      },
-      async signOut() {
-        const jar = await cookies();
-        jar.delete(SESSION_COOKIE);
-        return { error: null };
-      },
-    },
+
   };
 }
 
 export const server = cache(async () => {
   if (!authReady) return null;
   if (useNeon) {
-    const u = await resolveNeonAuthFromCookies();
-    return createNeonDbClient(u?.id ?? null, u ? 'authenticated' : 'anon') as unknown as SupabaseClient;
+    const u = await resolveNeonAuth();
+    return createNeonDbClient(u, u ? 'authenticated' : 'anonymous') as unknown as SupabaseClient;
   }
   const jar = await cookies();
   return createServerClient(supabaseUrl!, supabaseKey!, {
@@ -365,6 +294,28 @@ export const service = () => {
 };
 
 export const session = cache(async () => {
+  if (!authReady) return null;
+  if (useNeon) {
+    const bearer = (await headers()).get('authorization');
+    if (bearer?.startsWith('Bearer ')) {
+      const token = mobileSecret.safeParse(bearer.slice(7));
+      if (!token.success) return null;
+      const { rows } = await getPool().query(
+        `select u.id,u.email,u.email_confirmed_at,u.created_at,ns.id as "sessionId"
+         from private.mobile_sessions ms join ff_auth.users u on u.id=ms.user_id
+         join neon_auth."session" ns on ns.id=ms.provider_session_id and ns."userId"=u.id
+         join neon_auth."user" nu on nu.id=u.id
+         where ms.token_hash=$1 and ms.expires_at>now() and ns."expiresAt">now()
+          and ns."impersonatedBy" is null and nu."emailVerified" and not coalesce(nu.banned,false)`,
+        [sha256(token.data)],
+      );
+      const user = rows[0] as { id:string; email:string; email_confirmed_at:Date; created_at:Date; sessionId:string } | undefined;
+      return user ? { user: { ...user, created_at:user.created_at.toISOString(), email_confirmed_at:user.email_confirmed_at.toISOString() },
+        db: createNeonDbClient(user, 'authenticated') as unknown as SupabaseClient } : null;
+    }
+    const user = await resolveNeonAuth();
+    return user ? { user, db: createNeonDbClient(user, 'authenticated') as unknown as SupabaseClient } : null;
+  }
   const db = await server();
   if (!db) return null;
   const { data: { user } } = await db.auth.getUser();
@@ -442,7 +393,7 @@ export async function rooms(city: string, locality?: string, id?: string) {
 }
 
 export const publicDb = () => {
-  if (useNeon) return createNeonDbClient(null, 'anon') as unknown as SupabaseClient;
+  if (useNeon) return createNeonDbClient(null, 'anonymous') as unknown as SupabaseClient;
   return supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
 };
 

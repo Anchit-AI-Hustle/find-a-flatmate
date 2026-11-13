@@ -54,13 +54,13 @@ test('swiping people: pass, undo, like by keyboard, and a mutual like shows a ma
 test('swiping rooms: a short drag snaps back, a left swipe passes, a right swipe sends interest with the listing', async ({ page }) => {
   const t = tag();
   const [seeker, ownerA, ownerB, mod] = await Promise.all([member('sr-seeker'), member('sr-a'), member('sr-b'), moderator()]);
-  const noida = { city: 'noida', areas: ['sector-62'], min: 1_000_000, max: 2_500_000 };
+  const noida = { city: 'noida', areas: ['sector-137'], min: 1_000_000, max: 2_500_000 };
   await Promise.all([dbOnboard(seeker, { name: `Sia ${t}`, ...noida }), dbOnboard(ownerA, { name: `Aman ${t}`, intent: 'have_room', ...noida }), dbOnboard(ownerB, { name: `Bala ${t}`, intent: 'have_room', ...noida })]);
-  const place = { city_id: 'noida', locality_id: 'sector-62' };
+  const place = { city_id: 'noida', locality_id: 'sector-137' };
   await liveListing(ownerA, mod, { title: `Swipe room one ${t}`, ...place });
   await liveListing(ownerB, mod, { title: `Swipe room two ${t}`, ...place });
   await signIn(page, seeker.email);
-  await page.goto(`/app/discover?mode=rooms&area=sector-62`);
+  await page.goto(`/app/discover?mode=rooms&area=sector-137`);
   const card = page.locator('article.swipe-card');
   await expect(card).toContainText(/Swipe room (one|two)/);
   await expect(card.getByText('₹17,000')).toBeVisible();

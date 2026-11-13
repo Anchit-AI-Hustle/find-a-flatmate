@@ -1,0 +1,52 @@
+name: Native apps
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: sdkmanager 'platforms;android-36'
+      - run: ./gradlew assembleDebug lintDebug --no-daemon
+        working-directory: android-native
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-preview
+          path: android-native/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+        working-directory: ios-native
+      - name: Build SwiftUI app for Simulator and iPhone
+        working-directory: ios-native
+        run: |
+          xcodebuild -project FindAFlatmate.xcodeproj -scheme FindAFlatmate -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project FindAFlatmate.xcodeproj -scheme FindAFlatmate -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build
+          mkdir -p artifacts/Payload
+          ditto -c -k --sequesterRsrc --keepParent build/sim/Build/Products/Debug-iphonesimulator/FindAFlatmate.app artifacts/find-a-flatmate-ios-simulator.zip
+          cp -R build/device/Build/Products/Release-iphoneos/FindAFlatmate.app artifacts/Payload/
+          cd artifacts
+          zip -rq find-a-flatmate-ios.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-preview
+          path: ios-native/artifacts/*.*
+          if-no-files-found: error

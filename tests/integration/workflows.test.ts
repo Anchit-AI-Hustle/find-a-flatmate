@@ -44,7 +44,7 @@ describe('listing lifecycle', () => {
     expect((await mod.db.rpc('moderate', { kind: 'listing', target: id, action: 'approve', reason: 'Clear photos and costs' })).error).toBeNull();
     const seen = await seeker.db.from('listings').select('status,monthly,reviewed_at,expires_at').eq('id', id).single();
     expect(seen.data).toMatchObject({ status: 'active', monthly: 1_700_000 });
-    expect(Date.parse(seen.data!.expires_at) - Date.now()).toBeLessThanOrEqual(21 * 864e5);
+    expect(Date.parse(seen.data!.expires_at) - Date.parse(seen.data!.reviewed_at)).toBeLessThanOrEqual(21 * 864e5);
     expect((await owner.db.rpc('listing_transition', { l: id, action: 'pause' })).error).toBeNull();
     expect((await seeker.db.from('listings').select('id').eq('id', id)).data).toEqual([]);
     expect((await owner.db.rpc('listing_transition', { l: id, action: 'renew' })).error).toBeNull();

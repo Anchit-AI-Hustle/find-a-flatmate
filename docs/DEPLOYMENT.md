@@ -1,56 +1,20 @@
 # Deployment
 
-_Last updated: 12 November 2026_
+- Canonical repository and Vercel Git connection use `Anchit-AI-Hustle/find-a-flatmate`, branch `main`.
+- Vercel project is `find-a-flatmate` under `anchit-ai-hustle`, with Next.js and Node 24.
+- Production is https://find-a-flatmate.anchit-tandon.com and https://find-a-flatmate.vercel.app.
+- The connected Neon Free project is `curly-surf-73514052` in Singapore. Neon manages Google and email-link authentication. Listing images are sanitized WebP bytes in a private Postgres schema. Revisit object storage before approaching the Free database quota.
 
-| Item | Value |
-| --- | --- |
-| Repository | `Anchit-AI-Hustle/find-a-flatmate` (branch `main` deploys to production; pull requests get preview deployments) |
-| Host | Vercel project `find-a-flatmate`, team `anchit-ai-hustle` |
-| Production domain | https://find-a-flatmate.anchit-tandon.com (also `find-a-flatmate.vercel.app`) |
-| Framework and Node | `vercel.json` pins `nextjs`; `package.json` engines `>=22 <25` resolves to Node 24 |
-| CI | `.github/workflows/ci.yml`: lint, typecheck, unit tests, build on Node 22 and 24; database and browser suites against a local Supabase stack |
-| Scheduled job | Vercel Cron, daily 20:30 UTC (02:00 IST): `GET /api/cron/expire` |
-| Database and auth | Supabase. **Production project not yet created** (see "Blocked" below) |
+## Neon
 
-## Environment variables (Vercel)
+The integration injects `DATABASE_URL` and `NEON_AUTH_BASE_URL` in Production. Set `NEON_AUTH_COOKIE_SECRET` in the Vercel secret store and configure the exact trusted app origins in Neon Auth. `NEXT_PUBLIC_SITE_URL` is the canonical domain. `AUTH_TRUSTED_ORIGINS` adds specific alternate hostnames. Avoid pointing previews at production.
 
-| Key | Scope | Status |
-| --- | --- | --- |
-| `NEXT_PUBLIC_SITE_URL` | Production | Set to the production domain. Auth callbacks redirect to it. |
-| `APP_ENV` | Production | Set to `production`. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Production, Preview | **Not set.** Until it is, sign-in is switched off and public pages show "opening soon". |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Production, Preview | **Not set.** |
-| `SUPABASE_SERVICE_ROLE_KEY` | Production (sensitive, server only) | **Not set.** Needed for photo uploads, photo display, closure clean-up and the cron job. Never prefix with `NEXT_PUBLIC_`. |
-| `CRON_SECRET` | Production (sensitive) | **Not set.** Vercel sends it as a bearer token to the cron route; without it the route answers 401 and does nothing. |
+For an empty Neon branch, run `node --env-file=.env.local neon/apply-fresh.mjs` with a direct, owner URL and Auth enabled. For the existing schema, run `node --env-file=.env.local neon/apply-managed.mjs`. The bootstrap maps the Supabase roles and schemas to the Neon compatibility layer. The additive migration revokes old grants and requires a live verified Neon session in every actor-scoped transaction. Use trusted TLS and keep the database owner credential server only.
 
-## Blocked: production Supabase project
+For an existing Neon branch that predates `20261113070000_export_sent_messages.sql`, apply the actor-scoped export RPC before deploying the route. From the repository root, run `sed 's/auth\.uid()/ff_auth.uid()/g' supabase/migrations/20261113070000_export_sent_messages.sql | node --env-file=.env.local neon/apply-managed.mjs -1 -f -`. The function returns only the caller’s own messages, including in a blocked conversation. Chat permissions stay in their original RLS policy.
 
-Creating the project failed on 12 November 2026 with: the account has reached the limit of two active free projects. No paid plan was purchased. To unblock, do one of:
+The previous custom web session no longer works after the migration. Users should sign in again with the same Google email or email link. For a moderation role, verify the person’s real sign-in and then insert the confirmed application user ID into `private.moderators` through an operator connection. Never seed moderator or member accounts in production.
 
-1. Pause or delete an active free project you no longer need (Supabase dashboard → project → Settings → General), or
-2. Upgrade the organisation (a billing decision).
+CI integration and browser tests use local Supabase. For managed-provider smoke tests, use an isolated Neon branch and test account. Test new-account onboarding, returning sign-in, sign-out, protected routes, mobile exchange, and denied access after revocation. Production smoke tests can check those same routes without adding fictitious listings or profiles. See [native builds](NATIVE-BUILD.md) for the preview assets.
 
-## Provisioning steps once a project slot is free
-
-1. Create project `find-a-flatmate` in region `ap-south-1` (Mumbai).
-2. Apply the migrations in order: `supabase link --project-ref <ref>` then `supabase db push`. Do not load any seed data.
-3. Auth → URL configuration: Site URL `https://find-a-flatmate.anchit-tandon.com`; add redirect URL `https://find-a-flatmate.anchit-tandon.com/auth/callback`. Add a preview pattern only if previews should allow sign-in.
-4. Auth → Email: keep "Confirm email" on. The magic-link template must use the default `{{ .ConfirmationURL }}` (PKCE flow); the app does not accept token-hash links.
-5. Auth → SMTP: configure a custom SMTP sender before inviting anyone. The built-in sender is limited to a couple of emails per hour, which is not enough for magic-link sign-in.
-6. Consider enabling CAPTCHA for sign-in (Auth → Attack protection).
-7. In Vercel, add the four missing variables above (generate `CRON_SECRET` with `openssl rand -hex 32`), then redeploy `main`.
-8. Run the security advisors in the Supabase dashboard and resolve anything new.
-9. Make the first moderator. Sign in once on the live site with that person's email, then run in the Supabase SQL editor:
-   ```sql
-   insert into private.moderators(user_id) select id from auth.users where email = '<moderator email>';
-   ```
-   Moderator rows are created by an operator only; nothing in the app or migrations can grant the role.
-10. Smoke-test production: sign in, complete onboarding, create a draft listing with a photo, submit it, approve it as the moderator, confirm it appears on `/city/<city>`, then mark it filled. Remove the test account afterwards (Supabase → Authentication → Users).
-
-## Completing an account deletion request
-
-Closure hides the profile, removes listings and deletes stored photo files immediately. To finish erasure, an operator deletes the user in Supabase → Authentication → Users (rows cascade from `auth.users`), then records it outside the app. See `docs/PRIVACY-AND-SAFETY.md` for what is retained and why.
-
-## Rollback
-
-Vercel keeps previous deployments: Project → Deployments → pick the last good one → Promote to Production. Database migrations are forward-only; fix with a new migration.
+Set `CRON_SECRET` to run the daily Vercel expiry task. Account erasure needs operator verification and cleanup of the Neon Auth user and associated compatibility identity. Follow the privacy runbook for retention exceptions.
