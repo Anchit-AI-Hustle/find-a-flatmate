@@ -151,3 +151,11 @@ Each entry records the decision, why, where it lives in code, and what it costs 
 - **Lifestyle answers:** one tap per topic with emoji labels. The chosen option is stored as both the member's habit and what they would like; "must match" stores it as a dealbreaker. Stating a different expectation from your own habit is no longer possible in the UI (the data model still supports it).
 - **Avatars:** members have no photos, so each gets a simple drawn face generated from their id. It is decorative, not a likeness.
 - **Landing page:** reduced to a headline, three choices, four icon steps and three picture cards.
+
+## Sample cards in the swipe deck (20 November 2026)
+
+- **Decision:** when a member's deck runs out of real people or rooms, labelled sample cards follow so matching can always be tried. People samples (`lib/samples.ts`) are built around the member's own city, localities, dates and budget and scored by the same `matchPeople` / `matchRoom` functions, so the fit number and reasons are real output for that member.
+- **Why:** the owner asked for mock profiles for matching, and inventory is empty at launch. An empty deck teaches nothing about how the product works.
+- **Guardrails kept:** samples are code fixtures, not accounts. Nothing is written to the database for them: no user, no interest, no saved item, no chat (`tests/e2e/deck-samples.spec.ts` asserts the row counts). Every sample card carries a "Sample" tag, its accessible name starts with "Sample:", and the line under the buttons says "Sample for practice · nothing is sent". Liking a sample that "likes you" shows a practice match screen that says it is a sample and has no chat link. Samples that fail the member's hard checks or dealbreakers are left out, as real candidates would be.
+- **Scope:** swipe view only, and only with no filters applied and an active profile. The list view, filtered searches, public pages, counts and the mobile data API never include them. Real cards always come first.
+- **Memory:** swiped samples are remembered in a first-party cookie (`ff_samples_seen`, path `/app`, 180 days) so they do not return on the next visit; "See the samples again" clears it.

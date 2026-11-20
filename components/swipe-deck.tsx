@@ -4,21 +4,28 @@ import { useRef, useState, useTransition } from 'react';
 import { Heart, Info, RotateCcw, X } from 'lucide-react';
 import { action } from '@/lib/actions';
 
-export type DeckItem = { key: string; target: string; listing?: string; name: string; href: string; card: React.ReactNode };
+/** `sample` items are practice cards generated in code: swiping them never calls the server, so nothing is stored or sent. */
+export type DeckItem = { key: string; target: string; listing?: string; name: string; href?: string; card: React.ReactNode; sample?: boolean; likesBack?: boolean };
 type Choice = 'like' | 'pass';
+/** Swiped samples are remembered in a small first-party cookie so they do not come back on the next visit. */
+function storeSeen(keys: string[]) {
+  document.cookie = `ff_samples_seen=${keys.map(k => k.replace('sample-', '')).join('.')}; path=/app; max-age=15552000; samesite=lax`;
+}
 
 /** One card at a time: drag or tap ♥ / ✕ (or use the arrow keys). Every choice is saved through the same server action as the list view. */
-export function SwipeDeck({ items, empty, matchArt }: { items: DeckItem[]; empty: React.ReactNode; matchArt: React.ReactNode }) {
+export function SwipeDeck({ items, empty, matchArt, seenSamples = [] }: { items: DeckItem[]; empty: React.ReactNode; matchArt: React.ReactNode; seenSamples?: string[] }) {
   const [gone, setGone] = useState<string[]>([]);
+  const [seen, setSeen] = useState(seenSamples);
   const [dx, setDx] = useState(0);
   const [leaving, setLeaving] = useState<Choice | null>(null);
   const [error, setError] = useState('');
   const [said, setSaid] = useState('');
-  const [match, setMatch] = useState<{ name: string; chat: string } | null>(null);
+  const [match, setMatch] = useState<{ name: string; chat?: string } | null>(null);
   const [lastPass, setLastPass] = useState<DeckItem | null>(null);
   const [busy, start] = useTransition();
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
-  const queue = items.filter(i => !gone.includes(i.key));
+  const queue = items.filter(i => !gone.includes(i.key) && !(i.sample && seen.includes(i.key)));
+  const remember = (next: string[]) => { setSeen(next); storeSeen(next); };
   const top = queue[0];
   const behind = queue[1];
 
@@ -35,6 +42,17 @@ export function SwipeDeck({ items, empty, matchArt }: { items: DeckItem[]; empty
     const item = top;
     setError('');
     setLeaving(choice);
+    if (item.sample) {
+      window.setTimeout(() => {
+        setLeaving(null);
+        setDx(0);
+        remember([...seen, item.key]);
+        setLastPass(choice === 'pass' ? item : null);
+        setSaid(choice === 'like' ? `Liked ${item.name}, a sample. Nothing was sent.` : `Passed on ${item.name}, a sample.`);
+        if (choice === 'like' && item.likesBack) setMatch({ name: item.name });
+      }, 240);
+      return;
+    }
     start(async () => {
       const result = await send(item, choice);
       setLeaving(null);
@@ -49,6 +67,12 @@ export function SwipeDeck({ items, empty, matchArt }: { items: DeckItem[]; empty
   const undo = () => {
     if (!lastPass || busy) return;
     const item = lastPass;
+    if (item.sample) {
+      remember(seen.filter(k => k !== item.key));
+      setLastPass(null);
+      setSaid(`Brought back ${item.name}.`);
+      return;
+    }
     start(async () => {
       const result = await send(item, 'reset');
       if (result.error) { setError(result.error); return; }
@@ -63,15 +87,28 @@ export function SwipeDeck({ items, empty, matchArt }: { items: DeckItem[]; empty
       <div className="deck-match" role="alertdialog" aria-labelledby="match-title">
         {matchArt}
         <h2 id="match-title">It’s a match!</h2>
-        <p className="muted">You and {match.name} both said yes.</p>
+        <p className="muted">{match.chat ? `You and ${match.name} both said yes.` : `${match.name} is a sample. With a real member, a private chat opens here.`}</p>
         <div className="row" style={{ justifyContent: 'center' }}>
-          <Link className="btn primary" href={`/app/messages/${match.chat}`}>Say hello</Link>
+          {match.chat ? <Link className="btn primary" href={`/app/messages/${match.chat}`}>Say hello</Link> : null}
           <button className="btn" onClick={() => setMatch(null)}>Keep swiping</button>
         </div>
       </div>
     );
   }
-  if (!top) return <>{empty}{lastPass ? <p style={{ textAlign: 'center' }}><button className="btn small" onClick={undo} disabled={busy}><RotateCcw size={16} aria-hidden="true" /> Undo last pass</button></p> : null}</>;
+  if (!top) {
+    const samplesSeen = items.some(i => i.sample && seen.includes(i.key));
+    return (
+      <>
+        {empty}
+        {lastPass || samplesSeen ? (
+          <p className="row" style={{ justifyContent: 'center' }}>
+            {lastPass ? <button className="btn small" onClick={undo} disabled={busy}><RotateCcw size={16} aria-hidden="true" /> Undo last pass</button> : null}
+            {samplesSeen ? <button className="btn small" onClick={() => { remember([]); setLastPass(null); }}>See the samples again</button> : null}
+          </p>
+        ) : null}
+      </>
+    );
+  }
 
   const shift = leaving ? (leaving === 'like' ? 520 : -520) : dx;
   return (
@@ -88,7 +125,7 @@ export function SwipeDeck({ items, empty, matchArt }: { items: DeckItem[]; empty
           key={top.key}
           className={`swipe-card${leaving ? ' leaving' : dx ? ' dragging' : ''}`}
           style={{ transform: `translateX(${shift}px) rotate(${shift / 24}deg)` }}
-          aria-label={top.name}
+          aria-label={top.sample ? `Sample: ${top.name}` : top.name}
           onDragStart={event => event.preventDefault()}
           onPointerDown={event => { if (event.button === 0 && !busy) { drag.current = { x: event.clientX, moved: false }; event.currentTarget.setPointerCapture(event.pointerId); } }}
           onPointerMove={event => { if (drag.current) { const d = event.clientX - drag.current.x; if (Math.abs(d) > 6) drag.current.moved = true; if (drag.current.moved) setDx(d); } }}
@@ -103,11 +140,11 @@ export function SwipeDeck({ items, empty, matchArt }: { items: DeckItem[]; empty
       </div>
       <div className="deck-actions">
         <button className="round small" onClick={undo} disabled={!lastPass || busy} aria-label="Undo last pass"><RotateCcw size={20} aria-hidden="true" /></button>
-        <button className="round no" onClick={() => choose('pass')} disabled={busy} aria-label={`Pass on ${top.name}`}><X size={30} aria-hidden="true" /></button>
-        <button className="round yes" onClick={() => choose('like')} disabled={busy} aria-label={`Like ${top.name}`}><Heart size={30} aria-hidden="true" /></button>
-        <Link className="round small" href={top.href} aria-label={`More about ${top.name}`}><Info size={20} aria-hidden="true" /></Link>
+        <button className="round no" onClick={() => choose('pass')} disabled={busy || Boolean(leaving)} aria-label={`Pass on ${top.name}`}><X size={30} aria-hidden="true" /></button>
+        <button className="round yes" onClick={() => choose('like')} disabled={busy || Boolean(leaving)} aria-label={`Like ${top.name}`}><Heart size={30} aria-hidden="true" /></button>
+        {top.href ? <Link className="round small" href={top.href} aria-label={`More about ${top.name}`}><Info size={20} aria-hidden="true" /></Link> : <span className="round small spacer" aria-hidden="true" />}
       </div>
-      <p className="deck-count small muted">{queue.length} to go</p>
+      <p className="deck-count small muted">{top.sample ? 'Sample for practice · nothing is sent' : `${queue.filter(i => !i.sample).length} to go`}</p>
       <p className="sr" role="status">{said}</p>
       {error ? <p className="note error" role="alert">{error}</p> : null}
     </div>

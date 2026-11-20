@@ -30,7 +30,7 @@ required before launch.
 | Data requests | `data_subject_requests` | Data settings | Kind and optional details |
 | Moderator activity | `moderation_actions`, `admin_audit_logs` | Moderation | Moderator id, target, action, reason |
 | Rate-limit counters | `private.rate_buckets` | Every throttled write | User id, kind, window, count |
-| Cookies | Browser | Sign-in; intent choice | Supabase session cookies; `ff_intent` (1 hour) |
+| Cookies | Browser | Sign-in; intent choice; sample cards already swiped | Session cookies; `ff_intent` (1 hour); `ff_samples_seen` (180 days, holds only the ids of built-in sample cards) |
 
 Not collected by this codebase: phone number, government ID, date of birth, gender, photos of people, device
 location, payment details, contacts.

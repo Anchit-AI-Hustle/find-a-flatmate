@@ -259,7 +259,9 @@ details.filterbox > summary::-webkit-details-marker { display: none; }
 .fit-badge { position: absolute; right: 12px; bottom: 12px; display: grid; justify-items: center; min-width: 58px; padding: 6px 10px; border-radius: 16px; background: var(--paper); box-shadow: var(--shadow); line-height: 1; }
 .fit-badge b { font: 600 1.5rem/1 var(--display); color: var(--teal-deep); }
 .fit-badge span { font-size: .7rem; color: var(--ink-soft); }
-.likes-you { position: absolute; left: 12px; top: 12px; display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; background: var(--coral-deep); color: #fff; font-size: .8rem; font-weight: 700; }
+.deck-tags { position: absolute; left: 12px; top: 12px; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; }
+.sample-tag { padding: 5px 10px; border-radius: 999px; background: var(--ink); color: #fff; font-size: .8rem; font-weight: 700; letter-spacing: .02em; }
+.likes-you { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; background: var(--coral-deep); color: #fff; font-size: .8rem; font-weight: 700; }
 .deck-body { padding: 14px 16px 16px; display: grid; gap: 10px; }
 .deck-body h2 { margin: 0; font-size: 1.45rem; }
 .deck-facts, .deck-fit { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -276,6 +278,7 @@ details.filterbox > summary::-webkit-details-marker { display: none; }
 .round:hover { transform: scale(1.06); }
 .round:disabled { opacity: .45; cursor: default; transform: none; }
 .round.small { width: 48px; height: 48px; color: var(--ink-soft); }
+.round.spacer { visibility: hidden; }
 .round.yes { border-color: var(--teal); color: #fff; background: var(--teal); }
 .round.no { border-color: var(--coral-deep); color: var(--coral-deep); }
 .deck-count { margin: 0; }
