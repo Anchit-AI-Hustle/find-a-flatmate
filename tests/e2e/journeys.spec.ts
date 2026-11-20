@@ -81,6 +81,9 @@ test('poster cannot submit without a photo, uploads one (metadata stripped), and
   expect(served.headers()['content-type']).toBe('image/webp');
   expect((await served.body()).includes(Buffer.from('secret-gps-marker'))).toBe(false);
   await p.getByRole('button', { name: 'Submit for review' }).click();
+  // Wait for the submission to land before leaving: navigating away at once can cancel the request mid-flight.
+  // Once the listing is no longer a draft the editor drops its submit section.
+  await expect(p.getByRole('heading', { name: 'Submit for review' })).toHaveCount(0);
   await p.goto('/app/listings');
   await expect(p.getByText('In review')).toBeVisible();
   // Not public before moderation.
