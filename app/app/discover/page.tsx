@@ -1,7 +1,8 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { after } from 'next/server';
 import { LayoutList, Layers, SlidersHorizontal } from 'lucide-react';
-import { PersonDeckCard, RoomDeckCard } from '@/components/deck-cards';
+import { PersonDeckCard, RoomDeckCard, SampleRoomDeckCard } from '@/components/deck-cards';
 import { SwipeDeck, type DeckItem } from '@/components/swipe-deck';
 import { Fit, Score } from '@/components/fit';
 import { ActionForm } from '@/components/form';
@@ -11,6 +12,7 @@ import { Art } from '@/components/site';
 import { amenities, cities, intents, roomTypes, type City } from '@/lib/catalog';
 import { expandedListing, me, person, room, type Candidate, type Interest, type Listing } from '@/lib/db';
 import { matchPeople, matchRoom } from '@/lib/matching';
+import { samplePeople, sampleRooms } from '@/lib/samples';
 
 export const metadata = { title: 'Discover' };
 type Search = { view?: string; mode?: string; area?: string; max?: string; type?: string; intent?: string; amenity?: string; sort?: string; all?: string };
@@ -86,10 +88,27 @@ export default async function Discover({ searchParams }: { searchParams: Promise
       </article>
     ));
   }
+  const filtered = Boolean(q.area || q.max || q.type || q.intent || q.amenity);
+  // Practice cards follow the real ones so matching can always be tried. They are built in code around this member's
+  // own search, labelled "Sample", and never stored: no account, no interest, no chat.
+  const samples: DeckItem[] = [];
+  if (!listView && !filtered && profile.status === 'active') {
+    if (rooms) {
+      for (const { r, result } of sampleRooms(self).map(r => ({ r, result: matchRoom(self, r.room) })).filter(x => !x.result.hard_fail_reasons.length).sort(rank))
+        samples.push({ key: r.id, target: r.id, name: r.title, sample: true, card: <SampleRoomDeckCard r={r} result={result} /> });
+    } else {
+      const fits = samplePeople(self).map(p => ({ p, result: matchPeople(self, p.person) })).filter(x => !x.result.hard_fail_reasons.length).sort(rank);
+      for (const { p, result } of fits.sort((a, b) => Number(b.p.likesYou) - Number(a.p.likesYou)))
+        samples.push({ key: p.id, target: p.id, name: p.name, sample: true, likesBack: p.likesYou, card: (
+          <PersonDeckCard sample likesYou={p.likesYou} result={result}
+            c={{ id: p.id, display_name: p.name, city_id: p.person.city, localities: p.person.areas, budget_min: p.person.budgetMin, budget_max: p.person.budgetMax, move_from: p.person.from, move_until: p.person.until }} />
+        ) });
+    }
+  }
+  const seenSamples = ((await cookies()).get('ff_samples_seen')?.value ?? '').split('.').filter(v => /^[a-z]{1,20}$/.test(v)).map(v => `sample-${v}`);
   const shown = cards.length;
   cards = cards.slice(0, 40);
   const params = (extra: Record<string, string>) => '?' + new URLSearchParams(Object.fromEntries(Object.entries({ ...q, ...extra }).filter(([, v]) => v)) as Record<string, string>).toString();
-  const filtered = Boolean(q.area || q.max || q.type || q.intent || q.amenity);
   return (
     <>
       <div className="page-title"><h1>Discover</h1>
@@ -142,7 +161,9 @@ export default async function Discover({ searchParams }: { searchParams: Promise
       )}
       </> : (
         <SwipeDeck
-          items={deck.slice(0, 40)}
+          key={rooms ? 'rooms' : 'people'}
+          items={[...deck.slice(0, 40), ...samples]}
+          seenSamples={seenSamples}
           matchArt={<Art name="kitchen" width={960} height={720} />}
           empty={
             <div className="card empty">

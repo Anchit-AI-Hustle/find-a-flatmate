@@ -40,6 +40,10 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+      # The local stack's ports sit inside Linux's range for outgoing connections (32768-60999). An image pull that
+      # happens to be using one of them makes `supabase start` fail with "address already in use", so keep them free.
+      - name: Reserve the local Supabase ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54329
       - name: Start local Supabase (applies every migration)
         run: supabase start -x studio,imgproxy,logflare,vector,edge-runtime,supavisor,realtime,postgres-meta
       - name: Point the app at the local stack
