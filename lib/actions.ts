@@ -92,6 +92,8 @@ export async function logout() {
     const db = await server();
     if (db) await db.auth.signOut({ scope: 'local' });
   }
+  // The next person to sign in on this browser starts with a full set of sample cards.
+  (await cookies()).delete({ name: 'ff_samples_seen', path: '/app' });
   redirect('/');
 }
 function parse<T extends z.ZodType>(schema:T,f:FormData,nullable:string[]=[],extra:Record<string,unknown>={}):z.output<T>{
