@@ -43,11 +43,11 @@ test('sample people: labelled, swipeable, and never stored', async ({ page }) =>
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
   await page.setViewportSize(sizes[0]);
-  // Liking a sample who likes you shows a practice match with no chat to open.
+  // Liking a sample makes a practice match: the dialog says it is a sample and links to a practice chat, not a real one.
   await page.getByRole('button', { name: 'Like Aarav, a sample' }).click();
-  await expect(page.getByRole('alertdialog', { name: 'It’s a match!' })).toHaveAccessibleDescription(/Aarav is a sample/);
-  await expect(page.getByText('Aarav is a sample. With a real member, a private chat opens here.')).toBeVisible();
+  await expect(page.getByRole('alertdialog', { name: 'It’s a match!' })).toHaveAccessibleDescription(/Aarav is a sample, so this is a practice match/);
   await expect(page.getByRole('link', { name: 'Say hello' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Try the chat' })).toHaveAttribute('href', '/app/messages/sample-aarav');
   await page.getByRole('button', { name: 'Keep swiping' }).click();
   // Pass, undo, then pass again with the keyboard.
   const second = (await card(page).getAttribute('aria-label'))!;
@@ -75,10 +75,15 @@ test('sample people: labelled, swipeable, and never stored', async ({ page }) =>
   expect(stored(me.id)).toBe('0');
   // Samples swiped on the Rooms tab are remembered alongside these, and coming Back does not revive any of them.
   await page.getByRole('navigation', { name: 'What to show' }).getByRole('link', { name: 'Rooms' }).click();
+  // Wait for the Rooms deck itself: until the navigation lands, the People deck is still on screen.
+  await expect(page).toHaveURL(/mode=rooms/);
+  await expect(card(page)).not.toHaveAttribute('aria-label', third);
   const room = (await card(page).getAttribute('aria-label'))!;
   expect(room).toMatch(/^Sample: /);
   await page.getByRole('button', { name: /^Like / }).focus();
   await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('alertdialog', { name: 'It’s a match!' })).toHaveAccessibleDescription(/is a sample/);
+  await page.getByRole('button', { name: 'Keep swiping' }).click();
   await expect(card(page)).not.toHaveAttribute('aria-label', room);
   await page.goBack();
   await expect(card(page)).toHaveAttribute('aria-label', third);
@@ -100,13 +105,10 @@ test('sample people: labelled, swipeable, and never stored', async ({ page }) =>
   expect(stored(me.id)).toBe('0');
   expect(sql(`select count(*) from public.conversation_members where user_id='${me.id}'`)).toBe('0');
   expect(actions).toEqual([]);
-  // Nothing in Chats or Matches came from the samples.
-  await page.goto('/app/messages');
-  await expect(page.getByText('Aarav')).toHaveCount(0);
-  // They can be brought back on request.
+  // Passed samples can be brought back on request; the liked one stays out of the deck because it is now a practice match.
   await page.goto('/app/discover');
   await page.getByRole('button', { name: 'See the samples again' }).click();
-  await expect(card(page)).toHaveAttribute('aria-label', 'Sample: Aarav');
+  await expect(card(page)).toHaveAttribute('aria-label', second);
   expect(errors).toEqual([]);
 });
 
@@ -130,11 +132,11 @@ test('sample rooms: priced inside the member’s budget, hidden from the list an
     const label = (await card(page).getAttribute('aria-label'))!;
     seen.push(label);
     await page.getByRole('button', { name: i % 2 ? /^Pass on / : /^Like / }).click();
+    if (i % 2 === 0) await page.getByRole('button', { name: 'Keep swiping' }).click();
     await expect(page.locator(`article.swipe-card[aria-label="${label}"]`)).toHaveCount(0);
   }
   expect(seen.length).toBeGreaterThanOrEqual(2);
   expect(seen).not.toContain('Sample: Furnished room near the metro');
-  await expect(page.getByRole('heading', { name: 'It’s a match!' })).toHaveCount(0);
   expect(stored(me.id)).toBe('0');
   // People samples that clash with the dealbreaker are left out too.
   await page.goto('/app/discover');
@@ -158,11 +160,88 @@ test('sample rooms: priced inside the member’s budget, hidden from the list an
   await expect(page.getByRole('heading', { name: 'You’re all caught up' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'See the samples again' })).toHaveCount(0);
   // Signing out clears the memory, so the next person on this browser gets a full set.
-  expect((await page.context().cookies()).some(c => c.name === 'ff_samples_seen' && c.value)).toBe(true);
+  const kept = async () => (await page.context().cookies()).filter(c => c.name.startsWith('ff_samples_') && c.value).map(c => c.name).sort();
+  expect(await kept()).toEqual(['ff_samples_liked', 'ff_samples_seen']);
   await page.goto('/app/settings');
   await page.getByRole('button', { name: 'Sign out' }).first().click();
   await expect(page).toHaveURL(/\/$/);
-  expect((await page.context().cookies()).some(c => c.name === 'ff_samples_seen' && c.value)).toBe(false);
+  expect(await kept()).toEqual([]);
   expect(stored(me.id)).toBe('0');
   expect(errors).toEqual([]);
+});
+
+test('practice matches show in Matches and Chats, and the practice chat works without sending anything', async ({ page }) => {
+  const errors = watchConsole(page);
+  const me = await member('smp-chat');
+  await dbOnboard(me, { name: `Pia ${tag()}`, ...alone() }, everyAnswer);
+  await signIn(page, me.email);
+  const actions: string[] = [];
+  page.on('request', r => { if (r.method() === 'POST' && r.headers()['next-action']) actions.push(r.url()); });
+  const check = async (label: string) => {
+    for (const size of sizes) {
+      await page.setViewportSize(size);
+      const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+      expect(axe.violations.map(v => `${label} ${size.width}: ${v.id}: ${v.nodes[0]?.target}`)).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${label} overflows at ${size.width}`).toBe(true);
+    }
+    await page.setViewportSize(sizes[0]);
+  };
+  // Nothing yet.
+  await page.goto('/app/matches');
+  await expect(page.getByRole('heading', { name: 'No matches yet' })).toBeVisible();
+  // Like one sample person and one sample room.
+  await page.goto('/app/discover');
+  await page.getByRole('button', { name: 'Like Aarav, a sample' }).click();
+  await page.getByRole('button', { name: 'Keep swiping' }).click();
+  await page.goto('/app/discover?mode=rooms');
+  const room = (await card(page).getAttribute('aria-label'))!.replace('Sample: ', '');
+  await page.getByRole('button', { name: /^Like / }).click();
+  // The match screen leads straight into the practice chat.
+  await page.getByRole('link', { name: 'Try the chat' }).click();
+  await expect(page).toHaveURL(/\/app\/messages\/sample-[a-z]+$/);
+  await expect(page.getByRole('heading', { name: room, level: 1 })).toBeVisible();
+  // Both practice matches are listed, labelled, in Matches and in Chats.
+  for (const [path, heading] of [['/app/matches', 'Sample matches'], ['/app/messages', 'Sample chats']] as const) {
+    await page.goto(path);
+    const list = page.getByRole('region', { name: heading });
+    await expect(list.getByRole('link')).toHaveCount(2);
+    await expect(list.getByRole('link', { name: /Aarav/ })).toContainText('Sample');
+    await expect(list.getByRole('link', { name: new RegExp(room) })).toContainText('Sample');
+    await expect(list.getByText('Samples are not real members')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /No matches yet|No conversations yet/ })).toHaveCount(0);
+    await check(path);
+  }
+  // The practice chat: an opening line, a reply to each message, and it survives a reload.
+  await page.getByRole('region', { name: 'Sample chats' }).getByRole('link', { name: /Aarav/ }).click();
+  await expect(page).toHaveURL(/\/app\/messages\/sample-aarav$/);
+  await expect(page.getByRole('heading', { name: 'Aarav', level: 1 })).toBeVisible();
+  await expect(page.getByText('Nobody receives these messages; they stay on this device.')).toBeVisible();
+  const log = page.getByRole('log');
+  await expect(log).toContainText('I’m Aarav, a sample profile');
+  await page.getByRole('textbox', { name: 'Message' }).fill('Hello, when can you move in?');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(log).toContainText('Hello, when can you move in?');
+  await expect(log).toContainText('With a real match, this is where you compare move-in dates');
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+  await page.getByRole('textbox', { name: 'Message' }).fill('Shall we plan a visit?');
+  await page.getByRole('textbox', { name: 'Message' }).press('Enter');
+  await expect(log).toContainText('Next comes a visit.');
+  await check('practice chat');
+  await page.reload();
+  await expect(page.getByRole('log')).toContainText('Shall we plan a visit?');
+  await expect(page.getByRole('log')).toContainText('Next comes a visit.');
+  // None of that touched the server or the database.
+  expect(actions).toEqual([]);
+  expect(stored(me.id)).toBe('0');
+  expect(sql(`select (select count(*) from public.conversation_members where user_id='${me.id}') + (select count(*) from public.messages where sender_id='${me.id}')`)).toBe('0');
+  // Removing a practice match takes it out of Matches and Chats and closes its chat.
+  await page.getByRole('button', { name: 'Remove this sample match' }).click();
+  await expect(page).toHaveURL(/\/app\/matches$/);
+  await expect(page.getByRole('region', { name: 'Sample matches' }).getByRole('link')).toHaveCount(1);
+  await page.goto('/app/messages/sample-aarav');
+  await expect(page.getByRole('heading', { name: /not found|can’t find/i })).toBeVisible();
+  // A sample that was never liked has no chat either.
+  await page.goto('/app/messages/sample-meher');
+  await expect(page.getByRole('heading', { name: /not found|can’t find/i })).toBeVisible();
+  expect(errors.filter(e => !/404/.test(e))).toEqual([]);
 });

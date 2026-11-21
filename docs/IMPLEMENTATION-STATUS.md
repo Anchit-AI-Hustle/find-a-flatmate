@@ -1,6 +1,6 @@
 # Implementation status
 
-_Last updated: 20 November 2026_
+_Last updated: 21 November 2026_
 
 ## Where it stands
 
@@ -8,7 +8,7 @@ Vercel serves the public site. Production uses the connected Free Neon Postgres 
 
 Fictional profiles and rooms live in the practice area at `/try` and, as labelled sample cards, at the end of a signed-in member's swipe deck; they are generated in code and never enter the database or production inventory. Production inventory returned zero live rooms during verification. Native iOS and Android preview sources and CI are in `ios-native/` and `android-native/`. Production `/get` links to the published Android debug APK, unsigned iPhone IPA and iOS Simulator ZIP. Both native apps launched locally in simulators.
 
-Production checks reached the Google account chooser from both hosting URLs and verified public and protected routes, sample matching, download availability, and the Neon migration objects. Live Google account consent, email delivery, authenticated production journeys, and physical-device native journeys remain unverified. Local lint, TypeScript, production build, 38 unit tests, 41 SQL integration tests and 29 Playwright tests passed. GitHub Actions records hosted results.
+Production checks reached the Google account chooser from both hosting URLs and verified public and protected routes, sample matching, download availability, and the Neon migration objects. Live Google account consent, email delivery, authenticated production journeys, and physical-device native journeys remain unverified. Local lint, TypeScript, production build, 41 unit tests, 41 SQL integration tests and 32 Playwright tests passed. GitHub Actions records hosted results.
 
 ## P0
 
@@ -21,6 +21,8 @@ Production checks reached the Google account chooser from both hosting URLs and 
 | Discover people and rooms: filters, sort, fit reasons, differences, missing answers, empty states | Built; verified locally | journeys spec |
 | Swipe matching: one card at a time for people and rooms; like, pass, undo, match screen; buttons, arrow keys and drag; list view kept as an option | Built; verified locally | `tests/e2e/swipe.spec.ts` |
 | Sample cards in the swipe deck: labelled practice people and rooms after the real ones, scored by the real matcher, never stored | Built; verified locally | `lib/samples.test.ts`; `tests/e2e/deck-samples.spec.ts` |
+| Practice matches and chats for liked samples, listed and labelled in Matches and Messages; kept in the browser only | Built; verified locally | `tests/e2e/deck-samples.spec.ts` |
+| Every signed-in page audited with populated data at three widths | Verified locally | `tests/e2e/all-pages.spec.ts` |
 | One-tap lifestyle chips (14 topics, optional “must match”), illustrated avatars, shortened landing page | Built; verified locally | journeys and public specs |
 | Deterministic matching with hard constraints, weights, confidence and explanations | Built | `lib/matching.test.ts`; `docs/MATCHING-SPEC.md` |
 | Mutual interest, chat, unread counts, scam warning, report, block | Built; verified locally | journeys spec; workflows and hardening tests |

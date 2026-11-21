@@ -247,6 +247,7 @@ details.filterbox > summary::-webkit-details-marker { display: none; }
 
 /* Swipe deck */
 .doodle { flex: none; border-radius: 28%; display: block; }
+.room-avatar { flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 28%; background: var(--mint); color: var(--teal-deep); }
 .deck { display: grid; justify-items: center; gap: 14px; margin-top: 14px; outline: none; }
 .deck-stack { position: relative; width: min(100%, 400px); }
 .swipe-card { position: relative; background: var(--paper); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow); overflow: hidden; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; will-change: transform; transition: transform .22s ease; }

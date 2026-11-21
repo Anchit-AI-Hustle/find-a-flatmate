@@ -1,19 +1,22 @@
 import Link from 'next/link';
 import { ActionForm } from '@/components/form';
 import { Avatar, InterestActions, PersonFacts } from '@/components/people';
+import { SampleMatches } from '@/components/sample-matches';
 import { Art } from '@/components/site';
 import { Fit } from '@/components/fit';
 import { me, pendingRequests, person, type Candidate, type Interest, type Thread } from '@/lib/db';
 import { matchPeople } from '@/lib/matching';
+import { sampleCookies } from '@/lib/sample-cookies';
 
 export const metadata = { title: 'Matches' };
 export default async function Matches() {
   const s = await me();
   const { db, user, person: self } = s;
-  const [rows, inbox, pending] = await Promise.all([
+  const [rows, inbox, pending, samples] = await Promise.all([
     db.from('interests').select('actor_id,target_id,status').order('updated_at', { ascending: false }).limit(120),
     db.rpc('inbox'),
     pendingRequests(s),
+    sampleCookies(),
   ]);
   const interests = (rows.data ?? []) as Interest[];
   const threads = (inbox.data ?? []) as Thread[];
@@ -26,7 +29,7 @@ export default async function Matches() {
     Promise.all(incoming.map(i => lookup(i.actor_id))), Promise.all(sent.map(i => lookup(i.target_id))), Promise.all(set.map(i => lookup(i.target_id))),
   ]);
   const unavailable = incomingPeople.filter(c => !c).length;
-  const empty = !threads.length && !incoming.length && !sent.length && !set.length;
+  const empty = !threads.length && !incoming.length && !sent.length && !set.length && !samples.liked.length;
   return (
     <>
       <div className="page-title"><h1>Matches</h1></div>
@@ -74,6 +77,7 @@ export default async function Matches() {
           ))}
         </section>
       ) : null}
+      <SampleMatches initial={samples.liked} view="matches" />
       {sent.length ? (
         <section className="stack section" aria-labelledby="sent">
           <h2 id="sent">Waiting for a reply</h2>

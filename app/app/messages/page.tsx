@@ -1,13 +1,16 @@
 import Link from 'next/link';
 import { Avatar } from '@/components/people';
+import { SampleMatches } from '@/components/sample-matches';
 import { Art } from '@/components/site';
 import { me, type Thread } from '@/lib/db';
+import { sampleCookies } from '@/lib/sample-cookies';
 import { timeText } from '@/lib/validate';
 
 export const metadata = { title: 'Messages' };
 export default async function Messages() {
   const { db } = await me();
-  const threads = ((await db.rpc('inbox')).data ?? []) as Thread[];
+  const [inbox, samples] = await Promise.all([db.rpc('inbox'), sampleCookies()]);
+  const threads = (inbox.data ?? []) as Thread[];
   return (
     <>
       <div className="page-title"><h1>Messages</h1></div>
@@ -21,7 +24,7 @@ export default async function Messages() {
             </Link>
           ))}
         </div>
-      ) : (
+      ) : samples.liked.length ? null : (
         <div className="card empty">
           <Art name="visit" width={960} height={720} />
           <h2>No conversations yet</h2>
@@ -29,6 +32,7 @@ export default async function Messages() {
           <Link className="btn primary" href="/app/discover">Discover people and rooms</Link>
         </div>
       )}
+      <SampleMatches initial={samples.liked} view="chats" />
     </>
   );
 }

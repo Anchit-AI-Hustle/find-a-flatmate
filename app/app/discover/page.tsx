@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { cookies } from 'next/headers';
 import { after } from 'next/server';
 import { LayoutList, Layers, SlidersHorizontal } from 'lucide-react';
 import { PersonDeckCard, RoomDeckCard, SampleRoomDeckCard } from '@/components/deck-cards';
@@ -12,6 +11,7 @@ import { Art } from '@/components/site';
 import { amenities, cities, intents, roomTypes, type City } from '@/lib/catalog';
 import { expandedListing, me, person, room, type Candidate, type Interest, type Listing } from '@/lib/db';
 import { matchPeople, matchRoom } from '@/lib/matching';
+import { sampleCookies } from '@/lib/sample-cookies';
 import { samplePeople, sampleRooms } from '@/lib/samples';
 
 export const metadata = { title: 'Discover' };
@@ -21,7 +21,7 @@ const rank = <T extends { result: { score: number | null; hard_fail_reasons: str
 
 export default async function Discover({ searchParams }: { searchParams: Promise<Search> }) {
   const q = await searchParams;
-  const { db, user, profile, person: self } = await me();
+  const { db, user, profile, answers, person: self } = await me();
   const rooms = q.mode === 'rooms';
   const city = profile.city_id as City;
   const areas = cities[city]?.areas ?? {};
@@ -99,13 +99,13 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     } else {
       const fits = samplePeople(self).map(p => ({ p, result: matchPeople(self, p.person) })).filter(x => !x.result.hard_fail_reasons.length).sort(rank);
       for (const { p, result } of fits.sort((a, b) => Number(b.p.likesYou) - Number(a.p.likesYou)))
-        samples.push({ key: p.id, target: p.id, name: p.name, sample: true, likesBack: p.likesYou, card: (
+        samples.push({ key: p.id, target: p.id, name: p.name, sample: true, card: (
           <PersonDeckCard sample likesYou={p.likesYou} result={result}
             c={{ id: p.id, display_name: p.name, city_id: p.person.city, localities: p.person.areas, budget_min: p.person.budgetMin, budget_max: p.person.budgetMax, move_from: p.person.from, move_until: p.person.until }} />
         ) });
     }
   }
-  const seenSamples = ((await cookies()).get('ff_samples_seen')?.value ?? '').split('.').filter(v => /^[a-z]{1,20}$/.test(v)).map(v => `sample-${v}`);
+  const sampleState = await sampleCookies();
   const shown = cards.length;
   cards = cards.slice(0, 40);
   const params = (extra: Record<string, string>) => '?' + new URLSearchParams(Object.fromEntries(Object.entries({ ...q, ...extra }).filter(([, v]) => v)) as Record<string, string>).toString();
@@ -115,7 +115,8 @@ export default async function Discover({ searchParams }: { searchParams: Promise
         <Link className="btn small" href={params({ view: listView ? '' : 'list' })} aria-label={listView ? 'Switch to swipe cards' : 'Switch to list view'}>{listView ? <><Layers size={16} aria-hidden="true" /> Cards</> : <><LayoutList size={16} aria-hidden="true" /> List</>}</Link>
       </div>
       {profile.status === 'paused' ? <p className="note warn">Your profile is paused, so Discover is empty and nobody can find you. <Link href="/app/settings/privacy">Resume your profile</Link></p> : null}
-      <p className="small"><Link href="/try">Try matching with sample people and rooms</Link></p>
+      {/* A fit score needs at least four lifestyle topics answered on both sides. */}
+      {Object.keys(answers).length < 4 ? <p className="note">Answer a few more questions to see fit scores. <Link href="/onboarding/lifestyle">How you live</Link></p> : <p className="small"><Link href="/try">Try matching with sample people and rooms</Link></p>}
       <nav className="segmented" aria-label="What to show">
         <Link href={listView ? '/app/discover?view=list' : '/app/discover'} aria-current={rooms ? undefined : 'true'}>People</Link>
         <Link href={listView ? '/app/discover?mode=rooms&view=list' : '/app/discover?mode=rooms'} aria-current={rooms ? 'true' : undefined}>Rooms</Link>
@@ -162,8 +163,9 @@ export default async function Discover({ searchParams }: { searchParams: Promise
       </> : (
         <SwipeDeck
           key={rooms ? 'rooms' : 'people'}
-          items={[...deck.slice(0, 40), ...samples]}
-          seenSamples={seenSamples}
+          items={[...deck.slice(0, 40), ...samples.filter(x => !sampleState.liked.includes(x.key))]}
+          seen={sampleState.seen}
+          liked={sampleState.liked}
           matchArt={<Art name="kitchen" width={960} height={720} />}
           empty={
             <div className="card empty">
