@@ -10,12 +10,30 @@ import { parseSampleIds, storeSampleIds } from '@/lib/samples';
  * restored with the Back button cannot revive old state or drop newer state.
  */
 const listeners = new Set<() => void>();
+const notify = () => listeners.forEach(listener => listener());
+// Cookie writes raise no browser event, so other tabs are told over a channel, and every tab re-reads when it regains focus.
+let channel: BroadcastChannel | null = null;
 const subscribe = (listener: () => void) => {
+  if (!listeners.size) {
+    if ('BroadcastChannel' in window) { channel = new BroadcastChannel('ff-samples'); channel.onmessage = notify; }
+    window.addEventListener('storage', notify);
+    window.addEventListener('focus', notify);
+    window.addEventListener('pageshow', notify);
+    document.addEventListener('visibilitychange', notify);
+  }
   listeners.add(listener);
-  window.addEventListener('storage', listener);
-  return () => { listeners.delete(listener); window.removeEventListener('storage', listener); };
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size) return;
+    channel?.close();
+    channel = null;
+    window.removeEventListener('storage', notify);
+    window.removeEventListener('focus', notify);
+    window.removeEventListener('pageshow', notify);
+    document.removeEventListener('visibilitychange', notify);
+  };
 };
-const announce = () => listeners.forEach(listener => listener());
+const announce = () => { notify(); channel?.postMessage('changed'); };
 
 function cookieStore(name: string) {
   const raw = () => document.cookie.split('; ').find(c => c.startsWith(`${name}=`))?.slice(name.length + 1) ?? '';

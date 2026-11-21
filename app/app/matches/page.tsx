@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ActionForm } from '@/components/form';
 import { Avatar, InterestActions, PersonFacts } from '@/components/people';
-import { SampleMatches } from '@/components/sample-matches';
+import { SampleMatches, WhenNoSampleMatches } from '@/components/sample-matches';
 import { Art } from '@/components/site';
 import { Fit } from '@/components/fit';
 import { me, pendingRequests, person, type Candidate, type Interest, type Thread } from '@/lib/db';
@@ -29,17 +29,19 @@ export default async function Matches() {
     Promise.all(incoming.map(i => lookup(i.actor_id))), Promise.all(sent.map(i => lookup(i.target_id))), Promise.all(set.map(i => lookup(i.target_id))),
   ]);
   const unavailable = incomingPeople.filter(c => !c).length;
-  const empty = !threads.length && !incoming.length && !sent.length && !set.length && !samples.liked.length;
+  const empty = !threads.length && !incoming.length && !sent.length && !set.length;
   return (
     <>
       <div className="page-title"><h1>Matches</h1></div>
       {empty ? (
-        <div className="card empty">
-          <Art name="kitchen" width={960} height={720} />
-          <h2>No matches yet</h2>
-          <p className="muted">When you and someone else both show interest, a private chat opens here. Nobody can message you before that.</p>
-          <Link className="btn primary" href="/app/discover">Discover people and rooms</Link>
-        </div>
+        <WhenNoSampleMatches initial={samples.liked}>
+          <div className="card empty">
+            <Art name="kitchen" width={960} height={720} />
+            <h2>No matches yet</h2>
+            <p className="muted">When you and someone else both show interest, a private chat opens here. Nobody can message you before that.</p>
+            <Link className="btn primary" href="/app/discover">Discover people and rooms</Link>
+          </div>
+        </WhenNoSampleMatches>
       ) : null}
       {incoming.length ? (
         <section className="stack" aria-labelledby="incoming">

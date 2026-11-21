@@ -189,10 +189,14 @@ test('practice matches show in Matches and Chats, and the practice chat works wi
   // Nothing yet.
   await page.goto('/app/matches');
   await expect(page.getByRole('heading', { name: 'No matches yet' })).toBeVisible();
-  // Like one sample person and one sample room.
-  await page.goto('/app/discover');
+  // Like one sample person, arriving from the empty Matches page; going Back must show the match, not the empty state.
+  await page.getByRole('link', { name: 'Discover people and rooms' }).click();
   await page.getByRole('button', { name: 'Like Aarav, a sample' }).click();
   await page.getByRole('button', { name: 'Keep swiping' }).click();
+  await page.goBack();
+  await expect(page.getByRole('region', { name: 'Sample matches' }).getByRole('link', { name: /Aarav/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No matches yet' })).toHaveCount(0);
+  // And one sample room.
   await page.goto('/app/discover?mode=rooms');
   const room = (await card(page).getAttribute('aria-label'))!.replace('Sample: ', '');
   await page.getByRole('button', { name: /^Like / }).click();
@@ -234,10 +238,15 @@ test('practice matches show in Matches and Chats, and the practice chat works wi
   expect(actions).toEqual([]);
   expect(stored(me.id)).toBe('0');
   expect(sql(`select (select count(*) from public.conversation_members where user_id='${me.id}') + (select count(*) from public.messages where sender_id='${me.id}')`)).toBe('0');
-  // Removing a practice match takes it out of Matches and Chats and closes its chat.
+  // Removing a practice match takes it out of Matches and Chats and closes its chat, in another open tab too.
+  const other = await page.context().newPage();
+  await other.goto('/app/messages');
+  await expect(other.getByRole('region', { name: 'Sample chats' }).getByRole('link')).toHaveCount(2);
   await page.getByRole('button', { name: 'Remove this sample match' }).click();
   await expect(page).toHaveURL(/\/app\/matches$/);
   await expect(page.getByRole('region', { name: 'Sample matches' }).getByRole('link')).toHaveCount(1);
+  await expect(other.getByRole('region', { name: 'Sample chats' }).getByRole('link')).toHaveCount(1);
+  await other.close();
   await page.goto('/app/messages/sample-aarav');
   await expect(page.getByRole('heading', { name: /not found|can’t find/i })).toBeVisible();
   // A sample that was never liked has no chat either.

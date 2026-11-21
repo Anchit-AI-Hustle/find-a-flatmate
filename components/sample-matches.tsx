@@ -23,3 +23,11 @@ export function SampleMatches({ initial, view }: { initial: string[]; view: 'mat
     </section>
   );
 }
+
+/**
+ * Shows its children (a page's "nothing here yet" card) only while there are no practice matches. The decision is made
+ * from the live list, the same one `SampleMatches` draws, so a page restored with Back can never show both or neither.
+ */
+export function WhenNoSampleMatches({ initial, children }: { initial: string[]; children: React.ReactNode }) {
+  return useSampleIds(likedSamples, initial).length ? null : children;
+}
