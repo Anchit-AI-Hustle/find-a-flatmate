@@ -105,7 +105,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
         ) });
     }
   }
-  const sampleState = await sampleCookies();
+  const sampleState = await sampleCookies(user.id);
   const shown = cards.length;
   cards = cards.slice(0, 40);
   const params = (extra: Record<string, string>) => '?' + new URLSearchParams(Object.fromEntries(Object.entries({ ...q, ...extra }).filter(([, v]) => v)) as Record<string, string>).toString();
@@ -164,6 +164,7 @@ export default async function Discover({ searchParams }: { searchParams: Promise
         <SwipeDeck
           key={rooms ? 'rooms' : 'people'}
           items={[...deck.slice(0, 40), ...samples.filter(x => !sampleState.liked.includes(x.key))]}
+          member={user.id}
           seen={sampleState.seen}
           liked={sampleState.liked}
           matchArt={<Art name="kitchen" width={960} height={720} />}

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ActionForm } from '@/components/form';
 import { profile, requireSession } from '@/lib/db';
-import { logout } from '@/lib/actions';
+import { SignOut } from '@/components/sign-out';
 import { dateText } from '@/lib/validate';
 
 export const metadata = { title: 'Data and support' };
@@ -53,7 +53,7 @@ export default async function Data() {
           </table></div>
         </section>
       ) : null}
-      <form action={logout}><button className="btn">Sign out</button></form>
+      <SignOut />
     </div>
   );
 }

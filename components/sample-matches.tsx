@@ -6,8 +6,8 @@ import { Doodle } from './doodle';
 import { likedSamples, useSampleIds } from './sample-store';
 
 /** Practice matches: the sample cards this member liked. They are listed apart from real matches and always labelled. */
-export function SampleMatches({ initial, view }: { initial: string[]; view: 'matches' | 'chats' }) {
-  const liked = useSampleIds(likedSamples, initial).map(sampleInfo).filter(s => s !== undefined);
+export function SampleMatches({ initial, view, member }: { initial: string[]; view: 'matches' | 'chats'; member: string }) {
+  const liked = useSampleIds(likedSamples, initial, member).map(sampleInfo).filter(s => s !== undefined);
   if (!liked.length) return null;
   return (
     <section className="stack section" aria-labelledby="sample-matches">
@@ -28,6 +28,6 @@ export function SampleMatches({ initial, view }: { initial: string[]; view: 'mat
  * Shows its children (a page's "nothing here yet" card) only while there are no practice matches. The decision is made
  * from the live list, the same one `SampleMatches` draws, so a page restored with Back can never show both or neither.
  */
-export function WhenNoSampleMatches({ initial, children }: { initial: string[]; children: React.ReactNode }) {
-  return useSampleIds(likedSamples, initial).length ? null : children;
+export function WhenNoSampleMatches({ initial, member, children }: { initial: string[]; member: string; children: React.ReactNode }) {
+  return useSampleIds(likedSamples, initial, member).length ? null : children;
 }

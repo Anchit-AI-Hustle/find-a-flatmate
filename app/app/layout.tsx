@@ -1,7 +1,7 @@
 import { SideNav, TabBar } from '@/components/nav';
 import { Brand } from '@/components/site';
 import { pendingRequests, requireSession, type Thread } from '@/lib/db';
-import { logout } from '@/lib/actions';
+import { SignOut } from '@/components/sign-out';
 
 export const metadata = { robots: { index: false } };
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -20,7 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <Brand href="/app" />
         <SideNav unread={unread} requests={requests} moderator={mod.data === true} />
         <span className="spacer" />
-        <form action={logout}><button className="btn small block">Sign out</button></form>
+        <SignOut className="btn small block" />
       </aside>
       <div>
         <header className="app-top"><div className="wrap"><Brand href="/app" /></div></header>

@@ -61,10 +61,16 @@ const directory: SampleInfo[] = [
   ...rooms.map(r => ({ id: `sample-${r.id}`, name: r.title, kind: 'room' as const })),
 ];
 export const sampleInfo = (id: string) => directory.find(s => s.id === id);
-/** Reads a stored list of sample ids ("aarav.balcony"), keeping only ids that exist. */
-export const parseSampleIds = (raw: string | undefined) =>
-  [...new Set((raw ?? '').split('.').map(v => `sample-${v}`))].filter(id => directory.some(s => s.id === id));
-export const storeSampleIds = (ids: string[]) => [...new Set(ids)].filter(id => directory.some(s => s.id === id)).map(id => id.replace('sample-', '')).join('.');
+/** The stored lists carry a short tag of the member they belong to, so another member on the same browser starts clean. */
+const ownerTag = (member: string) => member.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+/** Reads a stored list of sample ids ("<owner>~aarav.balcony"), keeping only this member's ids that exist. */
+export function parseSampleIds(raw: string | undefined, member: string): string[] {
+  const [owner, list] = (raw ?? '').split('~');
+  if (!list || owner !== ownerTag(member)) return [];
+  return [...new Set(list.split('.').map(v => `sample-${v}`))].filter(id => directory.some(s => s.id === id));
+}
+export const storeSampleIds = (ids: string[], member: string) =>
+  `${ownerTag(member)}~${[...new Set(ids)].filter(id => directory.some(s => s.id === id)).map(id => id.replace('sample-', '')).join('.')}`;
 
 /**
  * What a sample says in its practice chat. Turn 0 opens the chat; each later turn answers one message from the member.

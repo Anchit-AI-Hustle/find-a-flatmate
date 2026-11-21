@@ -13,10 +13,10 @@ export type DeckItem = { key: string; target: string; listing?: string; name: st
 type Choice = 'like' | 'pass';
 
 /** One card at a time: drag or tap ♥ / ✕ (or use the arrow keys). Every choice is saved through the same server action as the list view. */
-export function SwipeDeck({ items, empty, matchArt, seen: seenAtLoad = [], liked: likedAtLoad = [] }: { items: DeckItem[]; empty: React.ReactNode; matchArt: React.ReactNode; seen?: string[]; liked?: string[] }) {
+export function SwipeDeck({ items, empty, matchArt, member, seen: seenAtLoad = [], liked: likedAtLoad = [] }: { items: DeckItem[]; empty: React.ReactNode; matchArt: React.ReactNode; member: string; seen?: string[]; liked?: string[] }) {
   const [gone, setGone] = useState<string[]>([]);
-  const seen = useSampleIds(seenSamples, seenAtLoad);
-  const liked = useSampleIds(likedSamples, likedAtLoad);
+  const seen = useSampleIds(seenSamples, seenAtLoad, member);
+  const liked = useSampleIds(likedSamples, likedAtLoad, member);
   const [dx, setDx] = useState(0);
   const [leaving, setLeaving] = useState<Choice | null>(null);
   const [error, setError] = useState('');
@@ -46,11 +46,11 @@ export function SwipeDeck({ items, empty, matchArt, seen: seenAtLoad = [], liked
       window.setTimeout(() => {
         setLeaving(null);
         setDx(0);
-        seenSamples.write(now => [...now, item.key]);
+        seenSamples.write(member, now => [...now, item.key]);
         setLastPass(choice === 'pass' ? item : null);
         setSaid(choice === 'like' ? `Liked ${item.name}, a sample. Nothing was sent.` : `Passed on ${item.name}, a sample.`);
         // Every liked sample becomes a practice match, so the whole flow (match, Matches, Chats) can be tried.
-        if (choice === 'like') { likedSamples.write(now => [...now, item.key]); setMatch({ name: item.name, href: `/app/messages/${item.key}`, sample: true }); }
+        if (choice === 'like') { likedSamples.write(member, now => [...now, item.key]); setMatch({ name: item.name, href: `/app/messages/${item.key}`, sample: true }); }
       }, 240);
       return;
     }
@@ -70,7 +70,7 @@ export function SwipeDeck({ items, empty, matchArt, seen: seenAtLoad = [], liked
     if (!lastPass || busy || leaving) return;
     const item = lastPass;
     if (item.sample) {
-      seenSamples.write(now => now.filter(k => k !== item.key));
+      seenSamples.write(member, now => now.filter(k => k !== item.key));
       setLastPass(null);
       setSaid(`Brought back ${item.name}.`);
       return;
@@ -105,7 +105,7 @@ export function SwipeDeck({ items, empty, matchArt, seen: seenAtLoad = [], liked
         {lastPass || samplesSeen ? (
           <p className="row" style={{ justifyContent: 'center' }}>
             {lastPass ? <button className="btn small" onClick={undo} disabled={busy}><RotateCcw size={16} aria-hidden="true" /> Undo last pass</button> : null}
-            {samplesSeen ? <button className="btn small" onClick={() => { seenSamples.write(now => now.filter(k => !items.some(i => i.key === k))); setLastPass(null); }}>See the samples again</button> : null}
+            {samplesSeen ? <button className="btn small" onClick={() => { seenSamples.write(member, now => now.filter(k => !items.some(i => i.key === k))); setLastPass(null); }}>See the samples again</button> : null}
           </p>
         ) : null}
       </>

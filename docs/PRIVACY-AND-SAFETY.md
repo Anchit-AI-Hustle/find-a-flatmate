@@ -31,7 +31,7 @@ required before launch.
 | Moderator activity | `moderation_actions`, `admin_audit_logs` | Moderation | Moderator id, target, action, reason |
 | Rate-limit counters | `private.rate_buckets` | Every throttled write | User id, kind, window, count |
 | Cookies | Browser | Sign-in; intent choice; sample cards swiped or liked | Session cookies; `ff_intent` (1 hour); `ff_samples_seen` and `ff_samples_liked` (180 days, hold only the ids of built-in sample cards; cleared on sign-out) |
-| Practice chat messages | Browser local storage only (`ff_sample_chat_<member id>`) | Practice chat with a sample | What the member typed to a sample and the scripted replies. Never sent to the server |
+| Practice chat messages | Browser local storage only (`ff_sample_chat_<member id>`) | Practice chat with a sample | What the member typed to a sample and the scripted replies. Never sent to the server; removed on sign-out or when the sample match is removed |
 
 Not collected by this codebase: phone number, government ID, date of birth, gender, photos of people, device
 location, payment details, contacts.

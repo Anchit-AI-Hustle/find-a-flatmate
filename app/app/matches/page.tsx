@@ -16,7 +16,7 @@ export default async function Matches() {
     db.from('interests').select('actor_id,target_id,status').order('updated_at', { ascending: false }).limit(120),
     db.rpc('inbox'),
     pendingRequests(s),
-    sampleCookies(),
+    sampleCookies(user.id),
   ]);
   const interests = (rows.data ?? []) as Interest[];
   const threads = (inbox.data ?? []) as Thread[];
@@ -34,7 +34,7 @@ export default async function Matches() {
     <>
       <div className="page-title"><h1>Matches</h1></div>
       {empty ? (
-        <WhenNoSampleMatches initial={samples.liked}>
+        <WhenNoSampleMatches initial={samples.liked} member={user.id}>
           <div className="card empty">
             <Art name="kitchen" width={960} height={720} />
             <h2>No matches yet</h2>
@@ -79,7 +79,7 @@ export default async function Matches() {
           ))}
         </section>
       ) : null}
-      <SampleMatches initial={samples.liked} view="matches" />
+      <SampleMatches initial={samples.liked} view="matches" member={user.id} />
       {sent.length ? (
         <section className="stack section" aria-labelledby="sent">
           <h2 id="sent">Waiting for a reply</h2>

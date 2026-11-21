@@ -11,10 +11,12 @@ import { signIn, watchConsole } from './helpers';
 const tag = () => Math.random().toString(36).replace(/[^a-z]/g, '').slice(0, 5) || 'zz';
 const sizes = [{ width: 390, height: 844 }, { width: 820, height: 1180 }, { width: 1440, height: 900 }];
 
-async function audit(page: Page, path: string, heading: string | RegExp, shows: (string | RegExp)[] = []) {
+async function audit(page: Page, path: string, heading: string, shows: (string | RegExp)[] = []) {
   const response = await page.goto(path);
   expect(response?.status(), `${path} status`).toBeLessThan(400);
   await expect(page.getByRole('heading', { name: heading, level: 1 }), `${path} heading`).toBeVisible();
+  // The page must be the one asked for, not a redirect target that happens to have a heading.
+  expect(new URL(page.url()).pathname, `${path} was redirected`).toBe(path.split('?')[0]);
   await expect(page.getByRole('heading', { name: 'Something went wrong' }), `${path} error screen`).toHaveCount(0);
   for (const text of shows) await expect(page.getByText(text).first(), `${path} shows ${text}`).toBeVisible();
   for (const size of sizes) {
@@ -52,7 +54,8 @@ test('every signed-in page renders with real content for a member who has used e
   await audit(page, '/app/discover', 'Discover');
   await audit(page, '/app/discover?view=list', 'Discover');
   await audit(page, '/app/discover?mode=rooms', 'Discover');
-  await audit(page, '/app/discover?mode=rooms&view=list', 'Discover', [`Audit room ${t}`]);
+  // Newest first, so this run's room is on the page however many older fixtures exist.
+  await audit(page, '/app/discover?mode=rooms&view=list&sort=new', 'Discover', [`Audit room ${t}`]);
   // Matches: every state has its own section and the right person in it.
   await audit(page, '/app/matches', 'Matches', ['Interested in you', 'Mutual matches', 'Waiting for a reply']);
   await expect(page.getByRole('region', { name: 'Interested in you' })).toContainText(`Farah ${t}`);
@@ -66,16 +69,19 @@ test('every signed-in page renders with real content for a member who has used e
   await audit(page, '/app/saved', 'Saved', [`Audit room ${t}`, `Omar ${t}`]);
   await audit(page, `/app/people/${owner.id}`, `Omar ${t}`);
   await audit(page, `/app/rooms/${listing}`, `Audit room ${t}`);
-  await audit(page, '/app/profile', /./);
-  await audit(page, '/app/settings', /./);
-  await audit(page, '/app/settings/privacy', /./);
-  await audit(page, '/app/settings/data', /./);
+  await audit(page, '/app/profile', `Sara ${t}`, ['How you live']);
+  await audit(page, '/app/settings', 'Settings');
+  await audit(page, '/app/settings/privacy', 'Privacy and visibility');
+  await audit(page, '/app/settings/data', 'Data and support');
   await audit(page, '/app/group', 'Group search is coming later');
-  await audit(page, '/app/listings', /./);
-  await audit(page, '/app/listings/new', /./);
-  await audit(page, '/onboarding/basics', /./);
-  await audit(page, '/onboarding/lifestyle', /./);
-  await audit(page, '/onboarding/preferences', /./);
+  await audit(page, '/app/listings', 'My listings');
+  await audit(page, '/app/listings/new', 'List a room');
+  await audit(page, '/onboarding/basics', 'Edit your basics');
+  await audit(page, '/onboarding/lifestyle', 'How you live');
+  await audit(page, '/onboarding/complete', `You’re in, Sara ${t}.`);
+  // The last onboarding step is only for a new profile; an active member is sent to the privacy settings instead.
+  await page.goto('/onboarding/preferences');
+  await expect(page).toHaveURL(/\/app\/settings\/privacy$/);
   // Accepting the request turns it into a second match and a second chat, both listed at once.
   await page.goto('/app/matches');
   await page.getByRole('region', { name: 'Interested in you' }).getByRole('button', { name: /Accept|Like|Match|Yes/ }).first().click();
@@ -100,16 +106,17 @@ test('the owner’s listing pages and the moderation dashboard render at every w
   const { data: draft, error } = await owner.db.rpc('save_listing', { l: null, v: (await import('../support/local')).listing({ title: `Owner draft ${t}` }) });
   expect(error).toBeNull();
   await signIn(page, owner.email);
-  await audit(page, '/app/listings', /./, [`Owner live ${t}`, `Owner draft ${t}`]);
-  await audit(page, `/app/listings/${draft}/edit`, /./, ['Submit for review']);
+  await audit(page, '/app/listings', 'My listings', [`Owner live ${t}`, `Owner draft ${t}`]);
+  await audit(page, `/app/listings/${draft}/edit`, 'Edit listing', ['Submit for review']);
   await expect(page.locator('input[name="title"]')).toHaveValue(`Owner draft ${t}`);
-  await audit(page, `/app/listings/${live}/edit`, /./);
+  await audit(page, `/app/listings/${live}/edit`, 'Edit listing');
+  await expect(page.locator('input[name="title"]')).toHaveValue(`Owner live ${t}`);
   await audit(page, `/app/rooms/${live}`, `Owner live ${t}`);
   expect(errors).toEqual([]);
   const admin = await (await browser.newContext({ viewport: sizes[0] })).newPage();
   const adminErrors = watchConsole(admin);
   await signIn(admin, mod.email);
-  await audit(admin, '/admin', /./);
+  await audit(admin, '/admin', 'Moderation');
   expect(adminErrors).toEqual([]);
   await admin.context().close();
 });

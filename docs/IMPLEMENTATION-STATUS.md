@@ -8,7 +8,7 @@ Vercel serves the public site. Production uses the connected Free Neon Postgres 
 
 Fictional profiles and rooms live in the practice area at `/try` and, as labelled sample cards, at the end of a signed-in member's swipe deck; they are generated in code and never enter the database or production inventory. Production inventory returned zero live rooms during verification. Native iOS and Android preview sources and CI are in `ios-native/` and `android-native/`. Production `/get` links to the published Android debug APK, unsigned iPhone IPA and iOS Simulator ZIP. Both native apps launched locally in simulators.
 
-Production checks reached the Google account chooser from both hosting URLs and verified public and protected routes, sample matching, download availability, and the Neon migration objects. Live Google account consent, email delivery, authenticated production journeys, and physical-device native journeys remain unverified. Local lint, TypeScript, production build, 41 unit tests, 41 SQL integration tests and 32 Playwright tests passed. GitHub Actions records hosted results.
+Production checks reached the Google account chooser from both hosting URLs and verified public and protected routes, sample matching, download availability, and the Neon migration objects. Live Google account consent, email delivery, authenticated production journeys, and physical-device native journeys remain unverified. Local lint, TypeScript, production build, 42 unit tests, 41 SQL integration tests and 32 Playwright tests passed. GitHub Actions records hosted results.
 
 ## P0
 

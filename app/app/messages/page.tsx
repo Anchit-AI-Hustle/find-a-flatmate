@@ -8,8 +8,8 @@ import { timeText } from '@/lib/validate';
 
 export const metadata = { title: 'Messages' };
 export default async function Messages() {
-  const { db } = await me();
-  const [inbox, samples] = await Promise.all([db.rpc('inbox'), sampleCookies()]);
+  const { db, user } = await me();
+  const [inbox, samples] = await Promise.all([db.rpc('inbox'), sampleCookies(user.id)]);
   const threads = (inbox.data ?? []) as Thread[];
   return (
     <>
@@ -25,7 +25,7 @@ export default async function Messages() {
           ))}
         </div>
       ) : (
-        <WhenNoSampleMatches initial={samples.liked}>
+        <WhenNoSampleMatches initial={samples.liked} member={user.id}>
           <div className="card empty">
             <Art name="visit" width={960} height={720} />
             <h2>No conversations yet</h2>
@@ -34,7 +34,7 @@ export default async function Messages() {
           </div>
         </WhenNoSampleMatches>
       )}
-      <SampleMatches initial={samples.liked} view="chats" />
+      <SampleMatches initial={samples.liked} view="chats" member={user.id} />
     </>
   );
 }

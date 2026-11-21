@@ -62,12 +62,19 @@ describe('practice matches and chats', () => {
     expect(sampleInfo('sample-nobody')).toBeUndefined();
     expect(sampleInfo('3f0c6e9a-1c1e-4b7e-9a57-6f3f0b1f4c11')).toBeUndefined();
   });
+  const member = '3f0c6e9a-1c1e-4b7e-9a57-6f3f0b1f4c11', someoneElse = '9c058bbb-964a-4561-8628-37a34258df64';
   it('reads stored ids, dropping duplicates and anything that is not a sample', () => {
-    expect(parseSampleIds('aarav.balcony.aarav.nobody.<script>')).toEqual(['sample-aarav', 'sample-balcony']);
-    expect(parseSampleIds(undefined)).toEqual([]);
-    expect(parseSampleIds('')).toEqual([]);
-    expect(storeSampleIds(['sample-aarav', 'sample-aarav', 'sample-nobody', 'sample-twin'])).toBe('aarav.twin');
-    expect(parseSampleIds(storeSampleIds(['sample-kabir', 'sample-whole']))).toEqual(['sample-kabir', 'sample-whole']);
+    expect(parseSampleIds('3f0c6e9a1c1e~aarav.balcony.aarav.nobody.<script>', member)).toEqual(['sample-aarav', 'sample-balcony']);
+    expect(parseSampleIds(undefined, member)).toEqual([]);
+    expect(parseSampleIds('', member)).toEqual([]);
+    expect(parseSampleIds('aarav.balcony', member)).toEqual([]);
+    expect(storeSampleIds(['sample-aarav', 'sample-aarav', 'sample-nobody', 'sample-twin'], member)).toBe('3f0c6e9a1c1e~aarav.twin');
+    expect(parseSampleIds(storeSampleIds(['sample-kabir', 'sample-whole'], member), member)).toEqual(['sample-kabir', 'sample-whole']);
+  });
+  it('ignores a list stored for a different member on the same browser', () => {
+    const stored = storeSampleIds(['sample-aarav', 'sample-twin'], member);
+    expect(parseSampleIds(stored, someoneElse)).toEqual([]);
+    expect(parseSampleIds(stored, member)).toEqual(['sample-aarav', 'sample-twin']);
   });
   it('opens the chat by saying it is a sample, then follows a short script that ends', () => {
     const person = sampleInfo('sample-aarav')!, room = sampleInfo('sample-balcony')!;

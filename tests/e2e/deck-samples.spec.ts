@@ -36,6 +36,7 @@ test('sample people: labelled, swipeable, and never stored', async ({ page }) =>
   await expect(card(page).getByText('Sector 62')).toBeVisible();
   await expect(page.getByText('Sample for practice · nothing is sent')).toBeVisible();
   await expect(page.getByRole('link', { name: /More about/ })).toHaveCount(0);
+  await expect(page.getByText('Answer a few more questions to see fit scores.')).toHaveCount(0);
   for (const size of sizes) {
     await page.setViewportSize(size);
     const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
@@ -122,6 +123,10 @@ test('sample rooms: priced inside the member’s budget, hidden from the list an
   await page.goto('/app/discover?mode=rooms');
   await expect(card(page)).toHaveAttribute('aria-label', /^Sample: /);
   await expect(card(page).getByText('Sample', { exact: true })).toBeVisible();
+  // Two answers are too few for a fit score; the page says so and links to the questions.
+  await expect(page.getByText('Answer a few more questions to see fit scores.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'How you live' })).toHaveAttribute('href', '/onboarding/lifestyle');
+  await expect(card(page).locator('.fit-badge')).toHaveCount(0);
   const price = Number((await card(page).locator('.price').innerText()).match(/₹([\d,]+)/)![1].replaceAll(',', ''));
   expect(price).toBeGreaterThan(0);
   expect(price).toBeLessThanOrEqual(search.max / 100);
@@ -227,13 +232,21 @@ test('practice matches show in Matches and Chats, and the practice chat works wi
   await expect(log).toContainText('Hello, when can you move in?');
   await expect(log).toContainText('With a real match, this is where you compare move-in dates');
   await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+  // Enter adds a line, as in a real chat; only Send sends.
   await page.getByRole('textbox', { name: 'Message' }).fill('Shall we plan a visit?');
   await page.getByRole('textbox', { name: 'Message' }).press('Enter');
+  await expect(log).not.toContainText('Shall we plan a visit?');
+  await page.getByRole('button', { name: 'Send' }).click();
   await expect(log).toContainText('Next comes a visit.');
   await check('practice chat');
   await page.reload();
   await expect(page.getByRole('log')).toContainText('Shall we plan a visit?');
   await expect(page.getByRole('log')).toContainText('Next comes a visit.');
+  // Practice matches never count as real ones: Home still says none and the tabs carry no badges.
+  await page.goto('/app');
+  await expect(page.getByRole('link', { name: /^0\s*mutual matches$/ })).toBeVisible();
+  await expect(page.locator('.tabbar .badge, .side .count')).toHaveCount(0);
+  await page.goto('/app/messages/sample-aarav');
   // None of that touched the server or the database.
   expect(actions).toEqual([]);
   expect(stored(me.id)).toBe('0');
@@ -246,7 +259,19 @@ test('practice matches show in Matches and Chats, and the practice chat works wi
   await expect(page).toHaveURL(/\/app\/matches$/);
   await expect(page.getByRole('region', { name: 'Sample matches' }).getByRole('link')).toHaveCount(1);
   await expect(other.getByRole('region', { name: 'Sample chats' }).getByRole('link')).toHaveCount(1);
+  // A tab still showing the removed chat closes it instead of taking more messages.
+  await page.goBack();
+  await expect(page.getByText('This sample match was removed, so its practice chat is closed.')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveCount(0);
+  // Signing out forgets the practice messages kept in this browser.
+  const chats = () => other.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('ff_sample_chat_')).length);
+  expect(await chats()).toBe(1);
+  await other.goto('/app/settings');
+  await other.getByRole('button', { name: 'Sign out' }).first().click();
+  await expect(other).toHaveURL(/\/$/);
+  expect(await chats()).toBe(0);
   await other.close();
+  await signIn(page, me.email);
   await page.goto('/app/messages/sample-aarav');
   await expect(page.getByRole('heading', { name: /not found|can’t find/i })).toBeVisible();
   // A sample that was never liked has no chat either.
