@@ -1,13 +1,16 @@
 import Link from 'next/link';
 import { Avatar } from '@/components/people';
+import { SampleMatches, WhenNoSampleMatches } from '@/components/sample-matches';
 import { Art } from '@/components/site';
 import { me, type Thread } from '@/lib/db';
+import { sampleCookies } from '@/lib/sample-cookies';
 import { timeText } from '@/lib/validate';
 
 export const metadata = { title: 'Messages' };
 export default async function Messages() {
-  const { db } = await me();
-  const threads = ((await db.rpc('inbox')).data ?? []) as Thread[];
+  const { db, user } = await me();
+  const [inbox, samples] = await Promise.all([db.rpc('inbox'), sampleCookies(user.id)]);
+  const threads = (inbox.data ?? []) as Thread[];
   return (
     <>
       <div className="page-title"><h1>Messages</h1></div>
@@ -22,13 +25,16 @@ export default async function Messages() {
           ))}
         </div>
       ) : (
-        <div className="card empty">
-          <Art name="visit" width={960} height={720} />
-          <h2>No conversations yet</h2>
-          <p className="muted">Chats open only when you and another member both show interest, so nobody can message you out of the blue.</p>
-          <Link className="btn primary" href="/app/discover">Discover people and rooms</Link>
-        </div>
+        <WhenNoSampleMatches initial={samples.liked} member={user.id}>
+          <div className="card empty">
+            <Art name="visit" width={960} height={720} />
+            <h2>No conversations yet</h2>
+            <p className="muted">Chats open only when you and another member both show interest, so nobody can message you out of the blue.</p>
+            <Link className="btn primary" href="/app/discover">Discover people and rooms</Link>
+          </div>
+        </WhenNoSampleMatches>
       )}
+      <SampleMatches initial={samples.liked} view="chats" member={user.id} />
     </>
   );
 }

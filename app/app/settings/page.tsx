@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requireSession } from '@/lib/db';
-import { logout } from '@/lib/actions';
+import { SignOut } from '@/components/sign-out';
 
 export const metadata = { title: 'Settings' };
 export default async function Settings() {
@@ -15,7 +15,7 @@ export default async function Settings() {
         <Link className="list-link" href="/safety"><span className="grow"><strong>Safety checklist</strong></span><span aria-hidden="true">→</span></Link>
         <Link className="list-link" href="/help"><span className="grow"><strong>Help</strong></span><span aria-hidden="true">→</span></Link>
       </nav>
-      <form action={logout}><button className="btn">Sign out</button></form>
+      <SignOut />
     </div>
   );
 }

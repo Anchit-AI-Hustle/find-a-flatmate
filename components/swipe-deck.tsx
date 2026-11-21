@@ -1,42 +1,31 @@
 'use client';
 import Link from 'next/link';
-import { useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { Heart, Info, RotateCcw, X } from 'lucide-react';
 import { action } from '@/lib/actions';
+import { likedSamples, seenSamples, useSampleIds } from './sample-store';
 
-/** `sample` items are practice cards generated in code: swiping them never calls the server, so nothing is stored or sent. */
-export type DeckItem = { key: string; target: string; listing?: string; name: string; href?: string; card: React.ReactNode; sample?: boolean; likesBack?: boolean };
-type Choice = 'like' | 'pass';
 /**
- * Swiped samples are remembered in a small first-party cookie so they do not come back on the next visit. The cookie is
- * the single source of truth: every write starts from what is stored now, so a second tab or a page restored by the Back
- * button cannot put old samples back or drop newer ones.
+ * `sample` items are practice cards generated in code: swiping them never calls the server, so nothing is stored or sent.
+ * Liking one makes it a practice match, kept in this browser and listed (labelled) in Matches and Chats.
  */
-const cookieName = 'ff_samples_seen';
-const listeners = new Set<() => void>();
-const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-const storedSeen = () => document.cookie.split('; ').find(c => c.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1) ?? '';
-const parseSeen = (raw: string) => raw.split('.').filter(v => /^[a-z]{1,20}$/.test(v)).map(v => `sample-${v}`);
-function storeSeen(change: (now: string[]) => string[]) {
-  const next = [...new Set(change(parseSeen(storedSeen())))].map(k => k.replace('sample-', '')).join('.');
-  document.cookie = `${cookieName}=${next}; path=/app; max-age=15552000; samesite=lax${location.protocol === 'https:' ? '; secure' : ''}`;
-  listeners.forEach(listener => listener());
-}
+export type DeckItem = { key: string; target: string; listing?: string; name: string; href?: string; card: React.ReactNode; sample?: boolean };
+type Choice = 'like' | 'pass';
 
 /** One card at a time: drag or tap ♥ / ✕ (or use the arrow keys). Every choice is saved through the same server action as the list view. */
-export function SwipeDeck({ items, empty, matchArt, seenSamples = [] }: { items: DeckItem[]; empty: React.ReactNode; matchArt: React.ReactNode; seenSamples?: string[] }) {
+export function SwipeDeck({ items, empty, matchArt, member, seen: seenAtLoad = [], liked: likedAtLoad = [] }: { items: DeckItem[]; empty: React.ReactNode; matchArt: React.ReactNode; member: string; seen?: string[]; liked?: string[] }) {
   const [gone, setGone] = useState<string[]>([]);
-  const seenRaw = useSyncExternalStore(subscribe, storedSeen, () => seenSamples.map(k => k.replace('sample-', '')).join('.'));
-  const seen = useMemo(() => parseSeen(seenRaw), [seenRaw]);
+  const seen = useSampleIds(seenSamples, seenAtLoad, member);
+  const liked = useSampleIds(likedSamples, likedAtLoad, member);
   const [dx, setDx] = useState(0);
   const [leaving, setLeaving] = useState<Choice | null>(null);
   const [error, setError] = useState('');
   const [said, setSaid] = useState('');
-  const [match, setMatch] = useState<{ name: string; chat?: string } | null>(null);
+  const [match, setMatch] = useState<{ name: string; href: string; sample?: boolean } | null>(null);
   const [lastPass, setLastPass] = useState<DeckItem | null>(null);
   const [busy, start] = useTransition();
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
-  const queue = items.filter(i => !gone.includes(i.key) && !(i.sample && seen.includes(i.key)));
+  const queue = items.filter(i => !gone.includes(i.key) && !(i.sample && (seen.includes(i.key) || liked.includes(i.key))));
   const top = queue[0];
   const behind = queue[1];
 
@@ -57,10 +46,11 @@ export function SwipeDeck({ items, empty, matchArt, seenSamples = [] }: { items:
       window.setTimeout(() => {
         setLeaving(null);
         setDx(0);
-        storeSeen(now => [...now, item.key]);
+        seenSamples.write(member, now => [...now, item.key]);
         setLastPass(choice === 'pass' ? item : null);
         setSaid(choice === 'like' ? `Liked ${item.name}, a sample. Nothing was sent.` : `Passed on ${item.name}, a sample.`);
-        if (choice === 'like' && item.likesBack) setMatch({ name: item.name });
+        // Every liked sample becomes a practice match, so the whole flow (match, Matches, Chats) can be tried.
+        if (choice === 'like') { likedSamples.write(member, now => [...now, item.key]); setMatch({ name: item.name, href: `/app/messages/${item.key}`, sample: true }); }
       }, 240);
       return;
     }
@@ -72,7 +62,7 @@ export function SwipeDeck({ items, empty, matchArt, seenSamples = [] }: { items:
       setGone(g => [...g, item.key]);
       setLastPass(choice === 'pass' ? item : null);
       setSaid(choice === 'like' ? `Liked ${item.name}.` : `Passed on ${item.name}.`);
-      if (result.match) setMatch({ name: item.name, chat: result.match });
+      if (result.match) setMatch({ name: item.name, href: `/app/messages/${result.match}` });
     });
   };
   const undo = () => {
@@ -80,7 +70,7 @@ export function SwipeDeck({ items, empty, matchArt, seenSamples = [] }: { items:
     if (!lastPass || busy || leaving) return;
     const item = lastPass;
     if (item.sample) {
-      storeSeen(now => now.filter(k => k !== item.key));
+      seenSamples.write(member, now => now.filter(k => k !== item.key));
       setLastPass(null);
       setSaid(`Brought back ${item.name}.`);
       return;
@@ -99,23 +89,23 @@ export function SwipeDeck({ items, empty, matchArt, seenSamples = [] }: { items:
       <div className="deck-match" role="alertdialog" aria-labelledby="match-title" aria-describedby="match-detail">
         {matchArt}
         <h2 id="match-title">It’s a match!</h2>
-        <p className="muted" id="match-detail">{match.chat ? `You and ${match.name} both said yes.` : `${match.name} is a sample. With a real member, a private chat opens here.`}</p>
+        <p className="muted" id="match-detail">{match.sample ? `${match.name} is a sample, so this is a practice match. It is in Matches and Chats.` : `You and ${match.name} both said yes.`}</p>
         <div className="row" style={{ justifyContent: 'center' }}>
-          {match.chat ? <Link className="btn primary" href={`/app/messages/${match.chat}`}>Say hello</Link> : null}
+          <Link className="btn primary" href={match.href}>{match.sample ? 'Try the chat' : 'Say hello'}</Link>
           <button className="btn" onClick={() => setMatch(null)}>Keep swiping</button>
         </div>
       </div>
     );
   }
   if (!top) {
-    const samplesSeen = items.some(i => i.sample && seen.includes(i.key));
+    const samplesSeen = items.some(i => i.sample && seen.includes(i.key) && !liked.includes(i.key));
     return (
       <>
         {empty}
         {lastPass || samplesSeen ? (
           <p className="row" style={{ justifyContent: 'center' }}>
             {lastPass ? <button className="btn small" onClick={undo} disabled={busy}><RotateCcw size={16} aria-hidden="true" /> Undo last pass</button> : null}
-            {samplesSeen ? <button className="btn small" onClick={() => { storeSeen(now => now.filter(k => !items.some(i => i.key === k))); setLastPass(null); }}>See the samples again</button> : null}
+            {samplesSeen ? <button className="btn small" onClick={() => { seenSamples.write(member, now => now.filter(k => !items.some(i => i.key === k))); setLastPass(null); }}>See the samples again</button> : null}
           </p>
         ) : null}
       </>

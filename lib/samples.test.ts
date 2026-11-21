@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dimensions, totals } from './catalog';
 import { matchPeople, matchRoom, type Person } from './matching';
-import { isSample, samplePeople, sampleRooms } from './samples';
+import { isSample, parseSampleIds, sampleInfo, sampleLine, samplePeople, sampleRooms, storeSampleIds } from './samples';
 
 const me: Person = {
   id: 'me', city: 'gurugram', areas: ['sector-56', 'dlf-phase-3'], from: '2026-12-01', until: '2027-01-15', months: 6, budgetMin: 1_200_000, budgetMax: 2_200_000,
@@ -52,5 +52,38 @@ describe('sample rooms', () => {
   });
   it('include one with unknown utilities, shown as unknown rather than zero', () => {
     expect(sampleRooms(me).some(r => r.room.costs.utilities === null)).toBe(true);
+  });
+});
+
+describe('practice matches and chats', () => {
+  it('knows every sample by id and nothing else', () => {
+    for (const p of samplePeople(me)) expect(sampleInfo(p.id)).toEqual({ id: p.id, name: p.name, kind: 'person' });
+    for (const r of sampleRooms(me)) expect(sampleInfo(r.id)).toEqual({ id: r.id, name: r.title, kind: 'room' });
+    expect(sampleInfo('sample-nobody')).toBeUndefined();
+    expect(sampleInfo('3f0c6e9a-1c1e-4b7e-9a57-6f3f0b1f4c11')).toBeUndefined();
+  });
+  const member = '3f0c6e9a-1c1e-4b7e-9a57-6f3f0b1f4c11', someoneElse = '9c058bbb-964a-4561-8628-37a34258df64';
+  it('reads stored ids, dropping duplicates and anything that is not a sample', () => {
+    expect(parseSampleIds('3f0c6e9a1c1e~aarav.balcony.aarav.nobody.<script>', member)).toEqual(['sample-aarav', 'sample-balcony']);
+    expect(parseSampleIds(undefined, member)).toEqual([]);
+    expect(parseSampleIds('', member)).toEqual([]);
+    expect(parseSampleIds('aarav.balcony', member)).toEqual([]);
+    expect(storeSampleIds(['sample-aarav', 'sample-aarav', 'sample-nobody', 'sample-twin'], member)).toBe('3f0c6e9a1c1e~aarav.twin');
+    expect(parseSampleIds(storeSampleIds(['sample-kabir', 'sample-whole'], member), member)).toEqual(['sample-kabir', 'sample-whole']);
+  });
+  it('ignores a list stored for a different member on the same browser', () => {
+    const stored = storeSampleIds(['sample-aarav', 'sample-twin'], member);
+    expect(parseSampleIds(stored, someoneElse)).toEqual([]);
+    expect(parseSampleIds(stored, member)).toEqual(['sample-aarav', 'sample-twin']);
+  });
+  it('opens the chat by saying it is a sample, then follows a short script that ends', () => {
+    const person = sampleInfo('sample-aarav')!, room = sampleInfo('sample-balcony')!;
+    expect(sampleLine(person, 0)).toBe('Hi! I’m Aarav, a sample profile. Say anything to try the chat.');
+    expect(sampleLine(room, 0)).toContain('sample room “Sunny room with a balcony”');
+    const turns = [1, 2, 3, 4, 5, 40].map(t => sampleLine(person, t));
+    expect(new Set(turns.slice(0, 4)).size).toBe(4);
+    expect(turns[4]).toBe(turns[3]);
+    expect(turns[5]).toBe(turns[3]);
+    expect(sampleLine(person, -3)).toBe(sampleLine(person, 0));
   });
 });

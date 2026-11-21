@@ -53,3 +53,36 @@ export function sampleRooms(me: Person): SampleRoom[] {
     };
   });
 }
+
+/** Name and kind of a built-in sample, for the practice match and chat screens. */
+export type SampleInfo = { id: string; name: string; kind: 'person' | 'room' };
+const directory: SampleInfo[] = [
+  ...people.map(p => ({ id: `sample-${p.id}`, name: p.name, kind: 'person' as const })),
+  ...rooms.map(r => ({ id: `sample-${r.id}`, name: r.title, kind: 'room' as const })),
+];
+export const sampleInfo = (id: string) => directory.find(s => s.id === id);
+/** The stored lists carry a short tag of the member they belong to, so another member on the same browser starts clean. */
+const ownerTag = (member: string) => member.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+/** Reads a stored list of sample ids ("<owner>~aarav.balcony"), keeping only this member's ids that exist. */
+export function parseSampleIds(raw: string | undefined, member: string): string[] {
+  const [owner, list] = (raw ?? '').split('~');
+  if (!list || owner !== ownerTag(member)) return [];
+  return [...new Set(list.split('.').map(v => `sample-${v}`))].filter(id => directory.some(s => s.id === id));
+}
+export const storeSampleIds = (ids: string[], member: string) =>
+  `${ownerTag(member)}~${[...new Set(ids)].filter(id => directory.some(s => s.id === id)).map(id => id.replace('sample-', '')).join('.')}`;
+
+/**
+ * What a sample says in its practice chat. Turn 0 opens the chat; each later turn answers one message from the member.
+ * The lines only explain how real chats work, so nothing is invented about a person or a home.
+ */
+export function sampleLine(sample: SampleInfo, turn: number): string {
+  const lines = [
+    sample.kind === 'room' ? `Hi! This is the sample room “${sample.name}”. Say anything to try the chat.` : `Hi! I’m ${sample.name}, a sample profile. Say anything to try the chat.`,
+    'With a real match, this is where you compare move-in dates, budget and house habits.',
+    'Next comes a visit. A real chat has a visit planner above the messages, and the address is shared only for a confirmed visit.',
+    'That is the whole flow: match, chat, visit. Real members answer for themselves. I only know these few lines.',
+    'I have run out of lines. Head back to Discover to find real people and rooms.',
+  ];
+  return lines[Math.min(Math.max(turn, 0), lines.length - 1)];
+}

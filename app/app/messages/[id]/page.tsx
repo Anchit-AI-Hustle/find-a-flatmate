@@ -3,13 +3,24 @@ import { notFound } from 'next/navigation';
 import { ChatLive } from '@/components/chat-live';
 import { ActionForm } from '@/components/form';
 import { BlockForm, ReportForm } from '@/components/people';
+import { SampleChat } from '@/components/sample-chat';
 import { VisitPanel } from '@/components/visit-panel';
 import { me, type Message, type Thread, type Visit } from '@/lib/db';
+import { sampleCookies } from '@/lib/sample-cookies';
+import { sampleInfo } from '@/lib/samples';
 import { timeText, uuid } from '@/lib/validate';
 
 export const metadata = { title: 'Conversation' };
 export default async function Conversation({ params }: { params: Promise<{ id: string }> }) {
-  const id = uuid.safeParse((await params).id);
+  const raw = (await params).id;
+  // A practice chat with a liked sample: it exists only in this browser, so there is nothing to load from the database.
+  const sample = sampleInfo(raw);
+  if (sample) {
+    const { user } = await me();
+    if (!(await sampleCookies(user.id)).liked.includes(sample.id)) notFound();
+    return <SampleChat sample={sample} member={user.id} />;
+  }
+  const id = uuid.safeParse(raw);
   if (!id.success) notFound();
   const { db, user } = await me();
   const thread = (((await db.rpc('inbox')).data ?? []) as Thread[]).find(t => t.id === id.data);

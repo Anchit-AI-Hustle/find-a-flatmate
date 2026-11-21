@@ -9,6 +9,7 @@ import sharp from 'sharp';
 import {createHash,randomUUID} from 'node:crypto';
 import {cookies} from 'next/headers';
 import { authOrigin, googleRedirect, neonAuth, sendMagicLink } from './auth/neon';
+import { clearSampleCookies } from './sample-cookies';
 
 export type State={error?:string;success?:string;evidence?:string;match?:string;listing?:string};
 const success={success:'Saved.'};
@@ -92,8 +93,8 @@ export async function logout() {
     const db = await server();
     if (db) await db.auth.signOut({ scope: 'local' });
   }
-  // The next person to sign in on this browser starts with a full set of sample cards.
-  (await cookies()).delete({ name: 'ff_samples_seen', path: '/app' });
+  // The next person to sign in on this browser starts with a full set of sample cards and no practice matches.
+  await clearSampleCookies();
   redirect('/');
 }
 function parse<T extends z.ZodType>(schema:T,f:FormData,nullable:string[]=[],extra:Record<string,unknown>={}):z.output<T>{

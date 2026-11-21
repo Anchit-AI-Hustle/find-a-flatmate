@@ -1,19 +1,22 @@
 import Link from 'next/link';
 import { ActionForm } from '@/components/form';
 import { Avatar, InterestActions, PersonFacts } from '@/components/people';
+import { SampleMatches, WhenNoSampleMatches } from '@/components/sample-matches';
 import { Art } from '@/components/site';
 import { Fit } from '@/components/fit';
 import { me, pendingRequests, person, type Candidate, type Interest, type Thread } from '@/lib/db';
 import { matchPeople } from '@/lib/matching';
+import { sampleCookies } from '@/lib/sample-cookies';
 
 export const metadata = { title: 'Matches' };
 export default async function Matches() {
   const s = await me();
   const { db, user, person: self } = s;
-  const [rows, inbox, pending] = await Promise.all([
+  const [rows, inbox, pending, samples] = await Promise.all([
     db.from('interests').select('actor_id,target_id,status').order('updated_at', { ascending: false }).limit(120),
     db.rpc('inbox'),
     pendingRequests(s),
+    sampleCookies(user.id),
   ]);
   const interests = (rows.data ?? []) as Interest[];
   const threads = (inbox.data ?? []) as Thread[];
@@ -31,12 +34,14 @@ export default async function Matches() {
     <>
       <div className="page-title"><h1>Matches</h1></div>
       {empty ? (
-        <div className="card empty">
-          <Art name="kitchen" width={960} height={720} />
-          <h2>No matches yet</h2>
-          <p className="muted">When you and someone else both show interest, a private chat opens here. Nobody can message you before that.</p>
-          <Link className="btn primary" href="/app/discover">Discover people and rooms</Link>
-        </div>
+        <WhenNoSampleMatches initial={samples.liked} member={user.id}>
+          <div className="card empty">
+            <Art name="kitchen" width={960} height={720} />
+            <h2>No matches yet</h2>
+            <p className="muted">When you and someone else both show interest, a private chat opens here. Nobody can message you before that.</p>
+            <Link className="btn primary" href="/app/discover">Discover people and rooms</Link>
+          </div>
+        </WhenNoSampleMatches>
       ) : null}
       {incoming.length ? (
         <section className="stack" aria-labelledby="incoming">
@@ -74,6 +79,7 @@ export default async function Matches() {
           ))}
         </section>
       ) : null}
+      <SampleMatches initial={samples.liked} view="matches" member={user.id} />
       {sent.length ? (
         <section className="stack section" aria-labelledby="sent">
           <h2 id="sent">Waiting for a reply</h2>

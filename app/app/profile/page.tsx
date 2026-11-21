@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { BadgeCheck } from 'lucide-react';
 import { areaName, cities, dimensions, intents, rupees, titles, today, type City } from '@/lib/catalog';
 import { me } from '@/lib/db';
-import { logout } from '@/lib/actions';
+import { SignOut } from '@/components/sign-out';
 import { dateText } from '@/lib/validate';
 
 export const metadata = { title: 'Your profile' };
@@ -37,7 +37,7 @@ export default async function ProfilePage() {
         <Link className="list-link" href="/app/group"><span className="grow"><strong>Find a home together</strong><br /><span className="small muted">Coming later</span></span><span aria-hidden="true">→</span></Link>
         <Link className="list-link" href="/app/settings"><span className="grow"><strong>Settings, privacy and data</strong></span><span aria-hidden="true">→</span></Link>
       </nav>
-      <form action={logout}><button className="btn">Sign out</button></form>
+      <SignOut />
     </div>
   );
 }
